@@ -1,0 +1,39 @@
+[project]
+name = "nidhi-backend"
+version = "0.1.0"
+description = "Backend for Nidhi AI"
+authors = [
+    {name = "Your Name",email = "you@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "fastapi (>=0.119.0,<0.120.0)",
+    "uvicorn (>=0.37.0,<0.38.0)",
+    "plaid-python (>=37.0.0,<38.0.0)",
+    "supabase (>=2.22.0,<3.0.0)",
+    "pydantic (>=2.12.3,<3.0.0)",
+    "pydantic-settings (>=2.11.0,<3.0.0)",
+    "python-jose (>=3.5.0,<4.0.0)",
+    "python-multipart (>=0.0.20,<0.0.21)",
+    "apscheduler (>=3.11.0,<4.0.0)",
+    "httpx (>=0.28.1,<0.29.0)",
+    "loguru (>=0.7.3,<0.8.0)",
+    "sentry-sdk (>=2.42.0,<3.0.0)",
+    "python-dotenv (>=1.1.1,<2.0.0)",
+    "tenacity (>=9.1.2,<10.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.2"
+pytest-asyncio = "^1.2.0"
+black = "^25.9.0"
+ruff = "^0.14.1"
+mypy = "^1.18.2"
+httpx = "^0.28.1"
+
