@@ -43,12 +43,21 @@ app = FastAPI(
 )
 
 # CORS Middleware
+# In development: allows localhost by default if CORS_ORIGINS not set
+# In production: requires explicit CORS_ORIGINS configuration (validated in settings)
+cors_origins = settings.CORS_ORIGINS if settings.CORS_ORIGINS else [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173"
+] if settings.ENVIRONMENT == "development" else []
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict in production
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
 )
 
 
