@@ -91,16 +91,12 @@ class Database:
 
                 # Attempt to clean up client resources
                 try:
-                    # Check for async cleanup method (aclose)
-                    if hasattr(cls._client, 'aclose') and callable(getattr(cls._client, 'aclose')):
-                        logger.debug("Client has aclose() method, but cannot await in sync context")
-                        logger.warning(
-                            "Client has async cleanup method. "
-                            "Consider using async context for proper cleanup."
-                        )
+                    has_close = False
+                    has_aclose = False
 
-                    # Check for sync cleanup method (close)
-                    elif hasattr(cls._client, 'close') and callable(getattr(cls._client, 'close')):
+                    # Check for sync cleanup method (close) and call it if present
+                    if hasattr(cls._client, 'close') and callable(getattr(cls._client, 'close')):
+                        has_close = True
                         logger.debug("Calling client close() method")
                         try:
                             cls._client.close()
@@ -109,8 +105,17 @@ class Database:
                             logger.warning(f"Error during client close: {close_error}")
                             # Continue with reset despite close error
 
-                    # Supabase client doesn't have explicit cleanup, but log for awareness
-                    else:
+                    # Check for async cleanup method (aclose) - log but cannot await in sync context
+                    if hasattr(cls._client, 'aclose') and callable(getattr(cls._client, 'aclose')):
+                        has_aclose = True
+                        logger.debug("Client has aclose() method, but cannot await in sync context")
+                        logger.warning(
+                            "Client has async cleanup method. "
+                            "Consider using async context for proper cleanup."
+                        )
+
+                    # Log if no cleanup methods are available
+                    if not has_close and not has_aclose:
                         logger.debug(
                             "Supabase client has no explicit close() method. "
                             "Relying on garbage collection for cleanup."

@@ -11,14 +11,23 @@ from app.models.enums import ConnectionStatus
 class Connection(BaseModel):
     """Connection model matching database schema.
 
-    Security Note:
-        The access_token and link_token fields contain sensitive credentials and must NEVER be:
-        - Included in API responses (excluded via Field(exclude=True))
-        - Logged or printed (protected by SecretStr)
-        - Committed to source control in examples or tests
-        - Exposed in error messages or debugging output
+    Security Note - Token Handling:
+        This model contains two distinct types of sensitive tokens:
 
-        Use get_access_token() and get_link_token() methods to access these values only when needed.
+        1. access_token (NEVER expose to frontend):
+           - Long-lived credential for backend-to-Plaid API calls
+           - MUST NEVER be included in API responses
+           - MUST NEVER be logged or printed
+           - Only accessed via get_access_token() for internal Plaid API calls
+
+        2. link_token (Safe to return to frontend):
+           - Short-lived token (~4 hours) for Plaid Link initialization
+           - DESIGNED to be returned to frontend via API responses
+           - Should NOT be logged or persisted
+           - Accessed via get_link_token() when initializing Plaid Link UI
+
+        Both fields use SecretStr and Field(exclude=True) to prevent accidental exposure.
+        Always use the getter methods to access token values intentionally.
 
         IMPORTANT: The artifact field is for NON-SENSITIVE metadata only. Never store tokens,
         passwords, or other credentials in artifact. Use dedicated SecretStr fields instead.
@@ -31,12 +40,12 @@ class Connection(BaseModel):
     access_token: Optional[SecretStr] = Field(
         default=None,
         exclude=True,
-        description="Provider access token (SENSITIVE - never log or expose)"
+        description="Long-lived Plaid access token for backend API calls (NEVER expose to frontend)"
     )
     link_token: Optional[SecretStr] = Field(
         default=None,
         exclude=True,
-        description="Plaid Link token for frontend initialization (SENSITIVE - short-lived, exclude from logs)"
+        description="Short-lived Plaid Link token for frontend initialization (safe to return in API responses)"
     )
     connection_status: ConnectionStatus = ConnectionStatus.INITIALIZING
     institution_id: Optional[str] = None
@@ -63,11 +72,12 @@ class Connection(BaseModel):
     updated_at: Optional[datetime] = None
 
     def get_access_token(self) -> Optional[str]:
-        """Get the raw access token value (for internal use only).
+        """Get the raw access_token value (INTERNAL USE ONLY - NEVER expose to frontend).
 
-        WARNING: This method exposes the sensitive access_token credential.
-        Only use this method when making authenticated API calls to the provider.
-        NEVER log, print, or include the returned value in API responses.
+        WARNING: This exposes the long-lived access_token credential used for Plaid API calls.
+        - Only use when making authenticated backend-to-Plaid API requests
+        - NEVER include in API responses to frontend
+        - NEVER log, print, or expose in error messages
 
         Returns:
             The raw access token string, or None if not set.
@@ -75,12 +85,15 @@ class Connection(BaseModel):
         return self.access_token.get_secret_value() if self.access_token else None
 
     def get_link_token(self) -> Optional[str]:
-        """Get the raw link token value (for API responses only).
+        """Get the raw link_token value (SAFE to return to frontend).
 
-        WARNING: This method exposes the sensitive link_token credential.
-        Only use this method when returning the link_token to the frontend for
-        Plaid Link initialization. Link tokens are short-lived (typically 4 hours).
-        NEVER log or persist the returned value.
+        This token is specifically designed to be sent to the frontend for Plaid Link
+        initialization. Link tokens are short-lived (typically 4 hours) and have limited scope.
+
+        Usage:
+        - SAFE to include in API responses for Plaid Link initialization
+        - Should NOT be logged or persisted in application logs
+        - Automatically expires after ~4 hours
 
         Returns:
             The raw link token string, or None if not set.

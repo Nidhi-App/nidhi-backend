@@ -53,11 +53,12 @@ class AccountSubtype(str, Enum):
     # ========== Investment Subtypes ==========
     RETIREMENT_401A = "401a"
     RETIREMENT_401K = "401k"
-    RETIREMENT_403B = "403b"
+    RETIREMENT_403B = "403B"
     RETIREMENT_457B = "457b"
     RETIREMENT_529 = "529"
     BROKERAGE = "brokerage"
     CASH_ISA = "cash isa"
+    CRYPTO_EXCHANGE = "crypto exchange"
     EDUCATION_SAVINGS_ACCOUNT = "education savings account"
     FIXED_ANNUITY = "fixed annuity"
     # GIC also used for investment
@@ -67,12 +68,16 @@ class AccountSubtype(str, Enum):
     ISA = "isa"
     KEOGH = "keogh"
     LIF = "lif"  # Life Income Fund
+    LIFE_INSURANCE = "life insurance"
     LIRA = "lira"  # Locked-in Retirement Account
     LRIF = "lrif"  # Locked-in Retirement Income Fund
     LRSP = "lrsp"  # Locked-in Retirement Savings Plan
+    MUTUAL_FUND = "mutual fund"
+    NON_CUSTODIAL_WALLET = "non-custodial wallet"
     NON_TAXABLE_BROKERAGE_ACCOUNT = "non-taxable brokerage account"
     OTHER_ANNUITY = "other annuity"
     OTHER_INSURANCE = "other insurance"
+    PAYROLL = "payroll"
     PENSION = "pension"
     PRIF = "prif"  # Prescribed Retirement Income Fund
     PROFIT_SHARING_PLAN = "profit sharing plan"
@@ -91,6 +96,7 @@ class AccountSubtype(str, Enum):
     SIPP = "sipp"  # Self-Invested Personal Pension
     STOCK_PLAN = "stock plan"
     TFSA = "tfsa"  # Tax-Free Savings Account
+    THRIFT_SAVINGS_PLAN = "thrift savings plan"
     TRUST = "trust"
     UGMA = "ugma"  # Uniform Gifts to Minors Act
     UTMA = "utma"  # Uniform Transfers to Minors Act

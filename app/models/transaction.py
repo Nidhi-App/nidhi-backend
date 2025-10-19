@@ -41,7 +41,7 @@ VALID_CURRENCIES = frozenset({
     "XDR", "XSU", "XUA",  # Special drawing rights and units
     # Other territories and dependencies
     "ANG", "AWG", "BBD", "BMD", "CUC", "FKP", "GGP", "GIP",
-    "GYD", "IMP", "JEP", "KYD", "SHP", "SRD", "SVC", "TVD",
+    "GYD", "IMP", "JEP", "KYD", "SHP", "SRD", "SVC",
 })
 
 
@@ -117,7 +117,7 @@ class UnifiedTransaction(BaseModel):
         # Validate format (3 letters)
         if not (len(normalized) == 3 and normalized.isalpha()):
             raise ValueError(
-                f"Currency must be a 3-letter code, got: '{v}' (length: {len(v)})"
+                f"Currency must be a 3-letter code, got: '{v}' (length: {len(normalized)})"
             )
 
         # Validate against ISO 4217 standard

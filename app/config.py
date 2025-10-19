@@ -3,6 +3,7 @@ Application configuration using Pydantic Settings.
 Environment variables are loaded from .env file.
 """
 
+import os
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
@@ -157,7 +158,7 @@ class Settings(BaseSettings):
         """
         # Auto-enable DEBUG in development if not explicitly set
         if self.ENVIRONMENT == "development":
-            if not hasattr(self, '_debug_explicitly_set'):
+            if 'DEBUG' not in os.environ:
                 self.DEBUG = True
 
         # Validate production requirements
@@ -177,9 +178,9 @@ class Settings(BaseSettings):
                 )
 
             # Validate Plaid production webhook
-            if self.PLAID_ENV == "production" and not self.PLAID_WEBHOOK_URL:
+            if self.PLAID_ENV == "production" and not self.PLAID_WEBHOOK_VERIFICATION_KEY:
                 raise ValueError(
-                    "PLAID_WEBHOOK_URL must be set when using production Plaid environment"
+                    "PLAID_WEBHOOK_VERIFICATION_KEY must be set when using production Plaid environment"
                 )
 
             # Require logging secret in production
