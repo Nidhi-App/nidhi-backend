@@ -126,43 +126,98 @@ class TestAccountService:
         # Arrange
         account = UnifiedAccount(**sample_account_data)
 
-        # Mock: account doesn't exist
+        # Mock SELECT operation (returns empty - account doesn't exist)
+        select_result = MagicMock()
+        select_result.data = []
+
+        # Mock INSERT operation (returns new account)
+        insert_result = MagicMock()
+        insert_result.data = [sample_account_data]
+
+        # Create table mock that supports both select and insert operations
+        table_mock = MagicMock()
+
+        # Configure select chain
+        select_eq_chain = MagicMock()
+        select_eq_chain.execute.return_value = select_result
+        select_chain = MagicMock()
+        select_chain.eq.return_value = select_eq_chain
+        table_mock.select.return_value = select_chain
+
+        # Configure insert chain
+        insert_chain = MagicMock()
+        insert_chain.execute.return_value = insert_result
+        table_mock.insert.return_value = insert_chain
+
+        # Mock table() to return the table_mock
+        mock_supabase_client.table.return_value = table_mock
+
+        # Act
         with patch("app.services.account_service.get_db", return_value=mock_supabase_client):
-            with patch.object(
-                AccountService,
-                "get_account_by_external_id",
-                return_value=None
-            ):
-                mock_supabase_client.table("accounts").execute.return_value.data = [sample_account_data]
+            result = await AccountService.upsert_account(account)
 
-                # Act
-                result = await AccountService.upsert_account(account)
-
-                # Assert
-                assert isinstance(result, UnifiedAccount)
-                assert result.external_account_id == "acc_123abc"
+        # Assert
+        assert isinstance(result, UnifiedAccount)
+        assert result.external_account_id == "acc_123abc"
+        # Verify insert was called (not update)
+        table_mock.insert.assert_called_once()
+        # Verify update was NOT called
+        if hasattr(table_mock, 'update'):
+            assert not table_mock.update.called
 
     async def test_upsert_account_updates_existing(self, mock_supabase_client, sample_account_data):
         """Test upsert updates account when it exists."""
         # Arrange
         account = UnifiedAccount(**{**sample_account_data, "current_balance": 2500.00})
-        existing_account = UnifiedAccount(**sample_account_data)
         updated_data = {**sample_account_data, "current_balance": 2500.00}
 
-        # Mock: account exists
+        # Mock SELECT operation (returns existing account)
+        select_result = MagicMock()
+        select_result.data = [{"account_id": 1}]
+
+        # Mock UPDATE operation (returns updated account)
+        update_result = MagicMock()
+        update_result.data = [updated_data]
+
+        # Create table mock that supports both select and update operations
+        table_mock = MagicMock()
+
+        # Configure select chain
+        select_eq_chain = MagicMock()
+        select_eq_chain.execute.return_value = select_result
+        select_chain = MagicMock()
+        select_chain.eq.return_value = select_eq_chain
+        table_mock.select.return_value = select_chain
+
+        # Configure update chain
+        update_eq_chain = MagicMock()
+        update_eq_chain.execute.return_value = update_result
+        update_chain = MagicMock()
+        update_chain.eq.return_value = update_eq_chain
+        table_mock.update.return_value = update_chain
+
+        # Mock table() to return the table_mock
+        mock_supabase_client.table.return_value = table_mock
+
+        # Act
         with patch("app.services.account_service.get_db", return_value=mock_supabase_client):
-            with patch.object(
-                AccountService,
-                "get_account_by_external_id",
-                return_value=existing_account
-            ):
-                mock_supabase_client.table("accounts").execute.return_value.data = [updated_data]
+            result = await AccountService.upsert_account(account)
 
-                # Act
-                result = await AccountService.upsert_account(account)
+        # Assert
+        assert result.current_balance == Decimal("2500.00")
+        # Verify update was called (not insert)
+        table_mock.update.assert_called_once()
+        # Verify insert was NOT called
+        if hasattr(table_mock, 'insert'):
+            assert not table_mock.insert.called
 
-                # Assert
-                assert result.current_balance == Decimal("2500.00")
+        # Verify immutable fields were NOT in the update payload
+        update_call_args = table_mock.update.call_args
+        update_payload = update_call_args[0][0]
+        assert "user_id" not in update_payload
+        assert "connection_id" not in update_payload
+        assert "external_account_id" not in update_payload
+        assert "created_at" not in update_payload
 
     async def test_upsert_accounts_bulk(self, mock_supabase_client, sample_user_id, sample_account_data):
         """Test bulk upsert of accounts."""
