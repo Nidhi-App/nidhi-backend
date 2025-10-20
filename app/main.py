@@ -85,9 +85,13 @@ async def health_check():
     }
 
 
-# TODO: Include API routers in later phases
-# from app.api.v1 import connections, accounts, transactions, webhooks
-# app.include_router(connections.router, prefix="/api/v1", tags=["connections"])
+# Include API routers
+from app.api.v1 import connections
+
+app.include_router(connections.router, prefix="/api/v1")
+
+# TODO: Include remaining routers in later phases
+# from app.api.v1 import accounts, transactions, webhooks
 # app.include_router(accounts.router, prefix="/api/v1", tags=["accounts"])
 # app.include_router(transactions.router, prefix="/api/v1", tags=["transactions"])
 # app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"])

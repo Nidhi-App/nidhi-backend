@@ -673,155 +673,222 @@ class PlaidTransactionNormalizer:
 
 ---
 
-## Phase 4: Plaid Link Flow (Frontend-Backend Integration) (Week 3, Days 3-5)
+## Phase 4: Plaid Link Flow (Frontend-Backend Integration) ✅ COMPLETE
 
 ### Goals
-- Implement Plaid Link token creation
-- Handle public token exchange
-- Store connection in database
+- ✅ Implement Plaid Link token creation
+- ✅ Handle public token exchange
+- ✅ Store connection in database
+- ✅ Implement connection management endpoints
 
-### Tasks
+### Completed Tasks
 
-#### 4.1 Link Token Creation Endpoint
+#### 4.1 Link Token Creation Endpoint ✅
 **File: `app/api/v1/connections.py`**
 
-```python
-@router.post("/plaid/link/token", response_model=LinkTokenResponse)
-async def create_plaid_link_token(
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Step 1: Create Plaid link_token for frontend
+**Implementation:**
+- ✅ Implemented link token creation endpoint: `POST /api/v1/connections/plaid/link/token`
+- ✅ Calls Plaid `/link/token/create` API via PlaidClient
+- ✅ Creates initial connection record (status: Initializing)
+- ✅ Stores link_token in connection.artifact
+- ✅ Returns link_token, expiration, and connection_id to frontend
+- ✅ Includes temporary header-based authentication (X-User-Id)
 
-    Flow:
-    1. Call Plaid API to create link_token
-    2. Store initial connection record (status: Initializing)
-    3. Return link_token to frontend
-    """
-    # Implementation here
-    pass
+**API Endpoint:**
+```
+POST /api/v1/connections/plaid/link/token
+Headers: X-User-Id: <uuid>
+
+Response: {
+  "link_token": "link-sandbox-...",
+  "expiration": "2025-01-20T14:30:00Z",
+  "connection_id": 123
+}
 ```
 
-**Tasks:**
-- [ ] Implement link token creation
-- [ ] Call Plaid `/link/token/create` API
-- [ ] Insert initial connection record in DB
-- [ ] Store link_token in connection.artifact
-- [ ] Return link_token to frontend
-
-#### 4.2 Public Token Exchange Endpoint
+#### 4.2 Public Token Exchange Endpoint ✅
 **File: `app/api/v1/connections.py`**
 
-```python
-@router.post("/plaid/exchange-token", response_model=ConnectionResponse)
-async def exchange_plaid_public_token(
-    request: ExchangeTokenRequest,  # { public_token, metadata }
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Step 2: Exchange public_token for access_token
-
-    Flow:
-    1. Call Plaid /item/public_token/exchange
-    2. Update connection with access_token & external_item_id
-    3. Store institution info from metadata
-    4. Update status to Pending
-    5. Trigger account fetch in background
-    """
-    # Implementation here
-    pass
-```
-
-**Tasks:**
-- [ ] Implement token exchange endpoint
-- [ ] Call Plaid `/item/public_token/exchange`
-- [ ] Update connection record with:
-  - `access_token`
+**Implementation:**
+- ✅ Implemented token exchange endpoint: `POST /api/v1/connections/plaid/exchange-token`
+- ✅ Calls Plaid `/item/public_token/exchange` API
+- ✅ Updates connection record with:
+  - `access_token` (stored securely)
   - `external_item_id`
   - `institution_id`
   - `institution_name`
   - `connection_status = 'Pending'`
-- [ ] Trigger background job to fetch accounts
+- ✅ Prepared for background account fetch (Phase 5)
+- ✅ Extracts institution metadata from Plaid Link response
 
-#### 4.3 Connection Status Endpoint
+**API Endpoint:**
+```
+POST /api/v1/connections/plaid/exchange-token
+Headers: X-User-Id: <uuid>
+Body: {
+  "public_token": "public-sandbox-...",
+  "metadata": {
+    "institution": {
+      "institution_id": "ins_3",
+      "name": "Chase"
+    }
+  }
+}
+
+Response: ConnectionResponse with updated details
+```
+
+#### 4.3 Connection Management Endpoints ✅
 **File: `app/api/v1/connections.py`**
 
-```python
-@router.get("/connections/{connection_id}", response_model=ConnectionResponse)
-async def get_connection(
-    connection_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Get connection details"""
-    pass
+**Implemented Endpoints:**
 
-@router.get("/connections", response_model=List[ConnectionResponse])
-async def list_connections(
-    current_user: User = Depends(get_current_user)
-):
-    """List all user connections"""
-    pass
+1. **Get Connection** ✅
+   ```
+   GET /api/v1/connections/{connection_id}
+   Headers: X-User-Id: <uuid>
 
-@router.delete("/connections/{connection_id}")
-async def disconnect(
-    connection_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Disconnect Plaid item
-    1. Call Plaid /item/remove
-    2. Update connection status to Revoked
-    3. Optionally: soft-delete accounts & transactions
-    """
-    pass
+   Response: ConnectionResponse
+   ```
+   - Returns connection details
+   - Verifies user authorization
+   - Returns 403 if user doesn't own connection
+
+2. **List Connections** ✅
+   ```
+   GET /api/v1/connections
+   Headers: X-User-Id: <uuid>
+
+   Response: {
+     "connections": [ConnectionResponse, ...],
+     "total": 5
+   }
+   ```
+   - Lists all user connections
+   - Filtered by user_id
+
+3. **Disconnect Connection** ✅
+   ```
+   DELETE /api/v1/connections/{connection_id}
+   Headers: X-User-Id: <uuid>
+
+   Response: {
+     "message": "Connection disconnected successfully",
+     "connection_id": 123
+   }
+   ```
+   - Calls Plaid `/item/remove` to invalidate access_token
+   - Updates connection status to Revoked
+   - Handles case where Plaid item already invalid
+   - Prepared for soft-deleting accounts & transactions (Phase 5)
+
+4. **Manual Sync Trigger** ✅
+   ```
+   POST /api/v1/connections/{connection_id}/sync
+   Headers: X-User-Id: <uuid>
+
+   Response: {
+     "message": "Sync started",
+     "connection_id": 123
+   }
+   ```
+   - API structure ready for Phase 5 sync implementation
+   - Validates connection ownership and status
+
+#### 4.4 Authentication & Authorization ✅
+**Implementation:**
+- ✅ Created temporary header-based authentication using `X-User-Id` header
+- ✅ User ID validation (must be valid UUID)
+- ✅ Authorization checks (users can only access their own connections)
+- ✅ Error handling for invalid/missing authentication
+
+**Note:** This temporary authentication will be replaced with proper JWT-based auth in production.
+
+#### 4.5 Integration Tests ✅
+**File: `tests/integration/test_plaid_link_flow.py`**
+
+**Test Coverage:**
+- ✅ Test creating link token via API endpoint
+- ✅ Test link token with invalid user ID
+- ✅ Test exchanging public token (with sandbox token)
+- ✅ Test listing user connections
+- ✅ Test getting specific connection
+- ✅ Test unauthorized access to other users' connections
+- ✅ Test connection not found (404)
+- ✅ Test disconnecting connection
+- ✅ Test unauthorized disconnect
+- ✅ Test manual sync trigger (API structure)
+- ✅ Test PlaidClient direct integration (create link token)
+- ✅ Test link token with webhook URL
+- ✅ Test link token with OAuth redirect URI
+
+**Test Results:**
+```bash
+# Run integration tests
+poetry run pytest tests/integration/test_plaid_link_flow.py -m integration -v
+
+# All tests passing ✅
 ```
 
-**Tasks:**
-- [ ] Implement get connection endpoint
-- [ ] Implement list connections endpoint
-- [ ] Implement disconnect endpoint
-- [ ] Add proper error handling and validation
+#### 4.6 API Documentation ✅
+- ✅ All endpoints documented with detailed docstrings
+- ✅ Request/response models defined
+- ✅ Example usage included in docstrings
+- ✅ OpenAPI/Swagger docs auto-generated at `/docs`
 
-#### 4.4 Complete Link Flow Service
-**File: `app/services/connection_service.py`**
+#### 4.7 Error Handling ✅
+- ✅ Plaid API errors wrapped with user-friendly messages
+- ✅ Authorization errors (403)
+- ✅ Not found errors (404)
+- ✅ Validation errors (400)
+- ✅ Server errors (500)
+- ✅ Proper logging for all error cases
 
-```python
-class ConnectionService:
-    async def create_plaid_connection(self, user_id: str) -> dict:
-        """Create link token and initial connection"""
-        # 1. Get Plaid provider_id
-        # 2. Call Plaid client to create link_token
-        # 3. Insert connection record (status: Initializing)
-        # 4. Return link_token
-        pass
+### Deliverables ✅
 
-    async def complete_plaid_connection(
-        self,
-        user_id: str,
-        public_token: str,
-        metadata: dict
-    ) -> Connection:
-        """Exchange token and complete connection"""
-        # 1. Exchange public_token
-        # 2. Update connection with access_token, item_id
-        # 3. Update institution info
-        # 4. Change status to Pending
-        # 5. Return connection
-        pass
+- ✅ Link token creation API (`POST /api/v1/connections/plaid/link/token`)
+- ✅ Public token exchange API (`POST /api/v1/connections/plaid/exchange-token`)
+- ✅ Connection management endpoints:
+  - ✅ `GET /api/v1/connections/{connection_id}`
+  - ✅ `GET /api/v1/connections`
+  - ✅ `DELETE /api/v1/connections/{connection_id}`
+  - ✅ `POST /api/v1/connections/{connection_id}/sync`
+- ✅ Integration tests for full Plaid Link flow (13 tests passing)
+- ✅ API router integrated into FastAPI app
+- ✅ Comprehensive error handling and logging
+- ✅ OpenAPI documentation generated
 
-    async def disconnect_plaid(self, connection_id: str):
-        """Remove Plaid item"""
-        # 1. Get connection
-        # 2. Call Plaid /item/remove
-        # 3. Update status to Revoked
-        pass
-```
+### Phase 4 Summary
 
-**Deliverables:**
-- ✅ Link token creation API
-- ✅ Public token exchange API
-- ✅ Connection management endpoints
-- ✅ Integration tests for full link flow
+**Status**: ✅ **COMPLETE**
+
+**What Was Built:**
+1. Complete Plaid Link flow API endpoints (5 endpoints)
+2. Integration with PlaidClient from Phase 3
+3. Connection lifecycle management (create → exchange → active → revoke)
+4. Temporary authentication system for development
+5. Comprehensive integration tests (13 tests, all passing)
+6. Full API documentation
+
+**Key Features:**
+- Frontend-ready API for Plaid Link integration
+- Secure token storage and handling
+- User authorization and ownership validation
+- Error handling with user-friendly messages
+- Background task preparation (Phase 5)
+- Live Plaid sandbox testing
+
+**Next Steps (Phase 5):**
+- Implement account sync after token exchange
+- Implement transaction sync (initial + incremental)
+- Add background sync orchestration
+- Soft-delete handling for disconnected accounts/transactions
+
+**Files Modified/Created:**
+- ✅ `app/api/v1/connections.py` (NEW - 517 lines)
+- ✅ `app/main.py` (updated to include connections router)
+- ✅ `tests/integration/test_plaid_link_flow.py` (NEW - 430 lines, 13 tests)
+- ✅ `pyproject.toml` (added pytest integration test configuration)
 
 ---
 

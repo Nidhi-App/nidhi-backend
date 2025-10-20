@@ -43,7 +43,7 @@ class ConnectionService:
             raise
 
     @staticmethod
-    async def get_connection(connection_id: int) -> Optional[Connection]:
+    async def get_connection(connection_id: UUID) -> Optional[Connection]:
         """Get connection by ID."""
         try:
             db = get_db()
@@ -90,7 +90,7 @@ class ConnectionService:
             raise
 
     @staticmethod
-    async def update_connection(connection_id: int, updates: dict) -> Connection:
+    async def update_connection(connection_id: UUID, updates: dict) -> Connection:
         """Update connection record."""
         try:
             db = get_db()
@@ -108,7 +108,7 @@ class ConnectionService:
             raise
 
     @staticmethod
-    async def update_connection_status(connection_id: int, status: ConnectionStatus) -> Connection:
+    async def update_connection_status(connection_id: UUID, status: ConnectionStatus) -> Connection:
         """Update connection status."""
         return await ConnectionService.update_connection(
             connection_id,
@@ -116,7 +116,7 @@ class ConnectionService:
         )
 
     @staticmethod
-    async def update_artifact(connection_id: int, artifact_updates: dict) -> Connection:
+    async def update_artifact(connection_id: UUID, artifact_updates: dict) -> Connection:
         """Update connection artifact atomically (merge with existing).
 
         Uses PostgreSQL's JSONB concatenation operator (||) for atomic merge.
@@ -196,7 +196,7 @@ class ConnectionService:
             raise
 
     @staticmethod
-    async def mark_needs_reauth(connection_id: int) -> Connection:
+    async def mark_needs_reauth(connection_id: UUID) -> Connection:
         """Mark connection as needing reauthorization."""
         return await ConnectionService.update_connection(
             connection_id,
@@ -204,7 +204,7 @@ class ConnectionService:
         )
 
     @staticmethod
-    async def update_last_synced(connection_id: int) -> Connection:
+    async def update_last_synced(connection_id: UUID) -> Connection:
         """Update last_synced_at timestamp."""
         return await ConnectionService.update_connection(
             connection_id,
@@ -212,7 +212,7 @@ class ConnectionService:
         )
 
     @staticmethod
-    async def delete_connection(connection_id: int) -> bool:
+    async def delete_connection(connection_id: UUID) -> bool:
         """Delete connection record.
 
         Args:

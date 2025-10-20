@@ -33,7 +33,7 @@ class Connection(BaseModel):
         passwords, or other credentials in artifact. Use dedicated SecretStr fields instead.
     """
 
-    connection_id: Optional[int] = None
+    connection_id: Optional[UUID] = None  # UUID in database, not int
     user_id: UUID
     provider_id: int
     external_item_id: Optional[str] = None

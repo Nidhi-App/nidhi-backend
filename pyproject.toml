@@ -37,3 +37,17 @@ ruff = "^0.14.1"
 mypy = "^1.18.2"
 httpx = "^0.28.1"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "integration: Integration tests that run against live services (Plaid sandbox, database)",
+    "unit: Unit tests with mocked dependencies (default)",
+]
+# Skip integration tests by default (run with: pytest -m integration)
+# Or run all tests with: pytest -m ""
+

@@ -11,7 +11,7 @@ from app.models.enums import ConnectionStatus
 class ConnectionResponse(BaseModel):
     """Connection response schema."""
 
-    connection_id: int
+    connection_id: UUID
     user_id: UUID
     provider_id: int
     external_item_id: Optional[str]
@@ -41,7 +41,7 @@ class LinkTokenResponse(BaseModel):
 
     link_token: str
     expiration: str
-    connection_id: int
+    connection_id: UUID
 
 
 class ExchangeTokenRequest(BaseModel):
