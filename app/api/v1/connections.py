@@ -19,6 +19,7 @@ from app.schemas.connection import (
     ConnectionListResponse
 )
 from app.services.connection_service import connection_service
+from app.services.sync_service import sync_service
 from app.providers.plaid.client import plaid_client, PlaidClientError
 from app.providers.plaid.normalizer import PlaidItemNormalizer
 from app.models.enums import ConnectionStatus
@@ -165,7 +166,7 @@ async def create_plaid_link_token(
             detail=f"Failed to create link token: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"Unexpected error creating link token: {e}", exc_info=True)
+        logger.error(f"Unexpected error creating link token: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Internal server error creating link token"
@@ -268,8 +269,9 @@ async def exchange_plaid_public_token(
             }
         )
 
-        # TODO Phase 5: Trigger background account sync
-        # background_tasks.add_task(sync_service.sync_accounts, connection.connection_id)
+        # Trigger background sync (accounts + transactions)
+        logger.info(f"Triggering background sync for connection: {connection.connection_id}")
+        background_tasks.add_task(sync_service.sync_connection, connection.connection_id)
 
         logger.info(
             f"Token exchanged successfully for connection: {connection.connection_id}, "
@@ -287,7 +289,7 @@ async def exchange_plaid_public_token(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error exchanging token: {e}", exc_info=True)
+        logger.error(f"Unexpected error exchanging token: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Internal server error exchanging token"
@@ -333,7 +335,7 @@ async def get_connection(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching connection {connection_id}: {e}", exc_info=True)
+        logger.error(f"Error fetching connection {connection_id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Internal server error fetching connection"
@@ -365,7 +367,7 @@ async def list_connections(
         )
 
     except Exception as e:
-        logger.error(f"Error listing connections: {e}", exc_info=True)
+        logger.error(f"Error listing connections: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Internal server error listing connections"
@@ -449,7 +451,7 @@ async def disconnect_plaid_connection(
             detail=f"Failed to disconnect from Plaid: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"Unexpected error disconnecting connection {connection_id}: {e}", exc_info=True)
+        logger.error(f"Unexpected error disconnecting connection {connection_id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Internal server error disconnecting connection"
@@ -465,8 +467,16 @@ async def trigger_manual_sync(
     """
     Trigger a manual sync for a connection (user-initiated refresh).
 
-    **Note:** Full sync implementation in Phase 5.
-    This endpoint provides the API structure for Phase 4.
+    **Flow:**
+    1. Verify connection exists and user owns it
+    2. Verify connection is in Active or Pending state
+    3. Trigger background sync (accounts + transactions)
+
+    **Background Sync:**
+    - Fetches latest accounts from Plaid
+    - Syncs transactions (initial if first time, incremental otherwise)
+    - Updates connection status to Active
+    - Handles errors gracefully (marks as needs_reauth if auth fails)
 
     Args:
         connection_id: Connection ID to sync
@@ -474,10 +484,10 @@ async def trigger_manual_sync(
         user_id: User ID from header (temporary auth)
 
     Returns:
-        dict: Sync started message
+        dict: Sync started message with connection_id
 
     Raises:
-        HTTPException: If sync trigger fails
+        HTTPException: If sync trigger fails (404, 403, 400)
     """
     try:
         # Get connection
@@ -496,28 +506,27 @@ async def trigger_manual_sync(
                 detail="Not authorized to sync this connection"
             )
 
-        # Verify connection is active
+        # Verify connection is in syncable state
         if connection.connection_status not in [ConnectionStatus.ACTIVE, ConnectionStatus.PENDING]:
             raise HTTPException(
                 status_code=400,
                 detail=f"Connection is {connection.connection_status.value}. Cannot sync."
             )
 
-        # TODO Phase 5: Trigger sync in background
-        # background_tasks.add_task(sync_service.sync_connection, connection_id)
-
+        # Trigger complete sync in background
         logger.info(f"Manual sync triggered for connection: {connection_id}")
+        background_tasks.add_task(sync_service.sync_connection, connection_id)
 
         return {
-            "message": "Sync started",
-            "connection_id": connection_id,
-            "note": "Full sync implementation in Phase 5"
+            "message": "Sync started in background",
+            "connection_id": str(connection_id),
+            "status": "processing"
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error triggering sync for connection {connection_id}: {e}", exc_info=True)
+        logger.error(f"Error triggering sync for connection {connection_id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Internal server error triggering sync"

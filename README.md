@@ -4,8 +4,8 @@ FastAPI backend for Nidhi AI expense tracking application with Plaid financial d
 
 ## 📋 Project Status
 
-**Current Phase**: Phase 4 - Plaid Link Flow ✅ COMPLETED
-**Next Phase**: Phase 5 - Data Sync (Accounts & Transactions)
+**Current Phase**: Phase 5 - Data Sync ✅ COMPLETED
+**Next Phase**: Phase 6 - Webhooks & Real-time Sync
 
 ## 🚀 Quick Start
 
@@ -153,7 +153,8 @@ Once the server is running, visit:
 
 ### Project Documentation
 
-- **[Plaid Integration Plan](./docs/PLAID_INTEGRATION_PLAN.md)** - Complete phase-by-phase development plan
+- **[Plaid Integration Flow](./docs/PLAID_INTEGRATION_FLOW.md)** - Complete end-to-end integration flow (Phases 1-5)
+- **[Plaid Integration Plan](./docs/PLAID_INTEGRATION_PLAN.md)** - Detailed phase-by-phase development plan
 - **[Phase 4 Testing Guide](./docs/TESTING_PHASE4.md)** - How to test Plaid Link flow integration
 
 ### Available Endpoints (Phase 4)
@@ -272,29 +273,37 @@ See [docs/PLAID_INTEGRATION_PLAN.md](./docs/PLAID_INTEGRATION_PLAN.md) for detai
 
 **Phase 4 Status**: ✅ **COMPLETE**
 
-**Key Endpoints:**
+### Phase 5: Data Sync - Accounts & Transactions ✅ COMPLETE
+- [x] Implemented account sync service (fetch and normalize from Plaid)
+- [x] Implemented initial transaction sync (no cursor)
+- [x] Implemented incremental transaction sync (with cursor)
+- [x] Created complete sync orchestration
+- [x] Integrated sync into token exchange (background task)
+- [x] Updated manual sync endpoint to use sync service
+- [x] Added error handling (auth errors → needs_reauth)
+- [x] Created integration tests for sync flow
+- [x] Connection status management (Pending → Active)
+
+**Phase 5 Status**: ✅ **COMPLETE**
+
+**Key Features:**
+- ✅ Account sync from Plaid
+- ✅ Initial transaction sync (all historical)
+- ✅ Incremental sync (added/modified/removed)
+- ✅ Cursor-based efficient updates
+- ✅ Background task execution
+- ✅ Auto-sync after token exchange
+
+**Sync Endpoints:**
 ```bash
-# Create link token for Plaid Link
-POST /api/v1/connections/plaid/link/token
-
-# Exchange public token for access token
-POST /api/v1/connections/plaid/exchange-token
-
-# Get connection details
-GET /api/v1/connections/{connection_id}
-
-# List all user connections
-GET /api/v1/connections
-
-# Disconnect connection
-DELETE /api/v1/connections/{connection_id}
-
-# Trigger manual sync (Phase 5 implementation)
+# Manual sync trigger (user-initiated refresh)
 POST /api/v1/connections/{connection_id}/sync
+
+# Auto-triggered after token exchange
+# Background: sync_service.sync_connection()
 ```
 
 ### Upcoming Phases
-- [ ] **Phase 5**: Data Sync - Accounts & Transactions (Week 4, Days 1-3)
 - [ ] **Phase 6**: Webhooks & Real-time Sync (Week 4, Days 4-5)
 - [ ] **Phase 7**: Background Jobs & Scheduled Sync (Week 5, Days 1-2)
 - [ ] **Phase 8**: Error Handling & Monitoring (Week 5, Days 3-4)
@@ -471,8 +480,31 @@ See [PLAID_INTEGRATION_PLAN.md](./PLAID_INTEGRATION_PLAN.md) for full details.
 - ✅ Live Plaid sandbox integration verified
 - ✅ Frontend-ready API with comprehensive documentation
 
+### Phase 5: Data Sync - Accounts & Transactions
+- [x] Created `app/services/sync_service.py` (425 lines)
+- [x] Implemented `sync_accounts()` - Fetch and normalize accounts from Plaid
+- [x] Implemented `sync_transactions_initial()` - Initial transaction sync
+- [x] Implemented `sync_transactions_incremental()` - Incremental sync with cursor
+- [x] Implemented `sync_connection()` - Complete sync orchestration
+- [x] Integrated sync into token exchange endpoint (auto-sync on connection)
+- [x] Updated manual sync endpoint to use sync_service
+- [x] Added cursor management for efficient incremental updates
+- [x] Implemented error handling (ITEM_LOGIN_REQUIRED → NEEDS_REAUTH)
+- [x] Connection status updates (Pending → Active after successful sync)
+- [x] Created integration tests for sync flow
+
+**Phase 5 Status**: ✅ **COMPLETE**
+
+**Phase 5 Deliverables**:
+- ✅ Complete sync service with account and transaction sync
+- ✅ Background task execution for non-blocking sync
+- ✅ Cursor-based incremental updates
+- ✅ Auto-sync after Plaid Link connection
+- ✅ Manual sync endpoint for user-initiated refresh
+- ✅ Integration tests verifying sync flow
+
 ---
 
 **Last Updated**: 2025-01-20
-**Version**: 0.4.0
+**Version**: 0.5.0
 **Maintainers**: Development Team
