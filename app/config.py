@@ -172,8 +172,9 @@ class Settings(BaseSettings):
             # Require explicit CORS configuration in production
             if not self.CORS_ORIGINS:
                 raise ValueError(
-                    "CORS_ORIGINS must be explicitly set in production. "
-                    "Specify allowed frontend origins (comma-separated): "
+                    "CORS_ORIGINS must be explicitly set in production environment. "
+                    "Leaving CORS_ORIGINS empty would block all cross-origin requests, causing API failures. "
+                    "Set CORS_ORIGINS with your allowed frontend origins (comma-separated): "
                     "CORS_ORIGINS=https://app.example.com,https://www.example.com"
                 )
 

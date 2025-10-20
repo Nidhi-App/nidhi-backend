@@ -176,24 +176,35 @@ class TestTransactionService:
                 assert result.amount == Decimal("35.00")
 
     async def test_upsert_transactions_bulk(self, mock_supabase_client, sample_transaction_data):
-        """Test bulk upsert of transactions."""
+        """Test bulk upsert of transactions using native bulk upsert."""
         # Arrange
+        txn_data_1 = sample_transaction_data.copy()
+        txn_data_2 = {**sample_transaction_data, "external_txn_id": "txn_456def", "txn_id": 2}
+
         transactions = [
-            UnifiedTransaction(**sample_transaction_data),
-            UnifiedTransaction(**{**sample_transaction_data, "external_txn_id": "txn_456def"})
+            UnifiedTransaction(**txn_data_1),
+            UnifiedTransaction(**txn_data_2)
         ]
 
-        # Mock upsert_transaction for each call
-        with patch.object(
-            TransactionService,
-            "upsert_transaction",
-            side_effect=[transactions[0], transactions[1]]
-        ):
-            # Act
+        # Mock the bulk upsert response
+        mock_supabase_client.table("transactions").execute.return_value.data = [
+            txn_data_1,
+            txn_data_2
+        ]
+
+        # Act
+        with patch("app.services.transaction_service.get_db", return_value=mock_supabase_client):
             result = await TransactionService.upsert_transactions(transactions)
 
-            # Assert
-            assert len(result) == 2
+        # Assert
+        assert len(result) == 2
+        assert isinstance(result[0], UnifiedTransaction)
+        assert isinstance(result[1], UnifiedTransaction)
+        assert result[0].external_txn_id == "txn_123abc"
+        assert result[1].external_txn_id == "txn_456def"
+
+        # Verify upsert was called with a list of transaction dicts
+        mock_supabase_client.table.assert_called_with("transactions")
 
     async def test_delete_transaction(self, mock_supabase_client):
         """Test deleting a transaction."""

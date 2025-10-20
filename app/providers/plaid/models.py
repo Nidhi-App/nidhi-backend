@@ -345,6 +345,7 @@ class PlaidTokenExchangeResponse(BaseModel):
 
     access_token: str = Field(
         ...,
+        repr=False,
         description="Access token for accessing item data"
     )
     item_id: str = Field(

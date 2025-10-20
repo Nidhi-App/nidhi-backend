@@ -12,11 +12,20 @@ def mock_supabase_client():
     """Mock Supabase client for testing."""
     client = Mock()
 
+    # Cache query builders per table to ensure same instance is returned
+    table_builders = {}
+
     # Mock table method that returns a query builder
-    def mock_table(table_name):
+    def mock_table_impl(table_name):
+        # Return cached builder if it exists
+        if table_name in table_builders:
+            return table_builders[table_name]
+
+        # Create new query builder
         query_builder = Mock()
         query_builder.select = Mock(return_value=query_builder)
         query_builder.insert = Mock(return_value=query_builder)
+        query_builder.upsert = Mock(return_value=query_builder)
         query_builder.update = Mock(return_value=query_builder)
         query_builder.delete = Mock(return_value=query_builder)
         query_builder.eq = Mock(return_value=query_builder)
@@ -28,9 +37,12 @@ def mock_supabase_client():
         execute_result.data = []
         query_builder.execute = Mock(return_value=execute_result)
 
+        # Cache and return
+        table_builders[table_name] = query_builder
         return query_builder
 
-    client.table = mock_table
+    # Wrap the function in a Mock so assert_called_with works
+    client.table = Mock(side_effect=mock_table_impl)
     return client
 
 

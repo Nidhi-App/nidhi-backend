@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import TransactionDirection
 
@@ -51,14 +51,22 @@ class UnifiedTransaction(BaseModel):
 
     txn_id: Optional[int] = None
     account_id: int = Field(..., description="Internal account_id from accounts table")
-    external_txn_id: str = Field(..., description="Provider's transaction ID")
+    external_txn_id: str = Field(
+        ...,
+        min_length=1,
+        description="Provider's transaction ID (required, non-empty)"
+    )
     txn_date: datetime = Field(..., description="Transaction date")
     posted_at: Optional[datetime] = Field(None, description="Posted/settled date")
     authorized_date: Optional[datetime] = Field(None, description="Authorization date (Plaid)")
     amount: Decimal = Field(..., description="Transaction amount (always positive)")
     currency: str = Field(..., description="ISO 4217 currency code (required, validated)")
     txn_direction: TransactionDirection = Field(..., description="Credit (in) or Debit (out)")
-    description_raw: str = Field(..., description="Raw transaction description")
+    description_raw: str = Field(
+        ...,
+        min_length=1,
+        description="Raw transaction description (required, non-empty)"
+    )
     merchant_name_raw: Optional[str] = Field(None, description="Merchant name")
     merchant_logo_url: Optional[str] = Field(None, description="Merchant logo URL (Plaid)")
     merchant_website: Optional[str] = Field(None, description="Merchant website (Plaid)")
@@ -83,6 +91,48 @@ class UnifiedTransaction(BaseModel):
     )
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_validator('external_txn_id')
+    @classmethod
+    def validate_external_txn_id(cls, v: str) -> str:
+        """Validate that external_txn_id is non-empty after stripping whitespace.
+
+        Args:
+            v: External transaction ID from provider
+
+        Returns:
+            Stripped transaction ID
+
+        Raises:
+            ValueError: If the transaction ID is empty or whitespace-only
+        """
+        if not v or not v.strip():
+            raise ValueError(
+                'external_txn_id cannot be empty. '
+                'A valid provider transaction ID is required for data integrity.'
+            )
+        return v.strip()
+
+    @field_validator('description_raw')
+    @classmethod
+    def validate_description_raw(cls, v: str) -> str:
+        """Validate that description_raw is non-empty after stripping whitespace.
+
+        Args:
+            v: Raw transaction description
+
+        Returns:
+            Stripped description
+
+        Raises:
+            ValueError: If the description is empty or whitespace-only
+        """
+        if not v or not v.strip():
+            raise ValueError(
+                'description_raw cannot be empty. '
+                'A transaction description is required for user display and categorization.'
+            )
+        return v.strip()
 
     @field_validator('amount')
     @classmethod
@@ -129,9 +179,9 @@ class UnifiedTransaction(BaseModel):
 
         return normalized
 
-    class Config:
-        from_attributes = True
-        json_schema_extra = {
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
             "example": {
                 "account_id": 1,
                 "external_txn_id": "yBVBEwrXdDf9gfXP4kcKFK6FjqqmRhQ4JqYnb",
@@ -159,3 +209,4 @@ class UnifiedTransaction(BaseModel):
                 }
             }
         }
+    )

@@ -6,6 +6,7 @@ with the Plaid API. It handles authentication, error handling, and provides
 typed methods for all Plaid API operations needed for the integration.
 """
 
+import asyncio
 import plaid
 from plaid.api import plaid_api
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
@@ -167,9 +168,9 @@ class PlaidClient:
 
             request = LinkTokenCreateRequest(**request_kwargs)
 
-            # Call Plaid API
+            # Call Plaid API (synchronous SDK call wrapped in thread)
             logger.info(f"Creating link token for user: {self._hash_user_id(user_id)}")
-            response = self.client.link_token_create(request)
+            response = await asyncio.to_thread(self.client.link_token_create, request)
 
             logger.info(f"Link token created successfully for user: {self._hash_user_id(user_id)}")
 
@@ -213,7 +214,7 @@ class PlaidClient:
             request = ItemPublicTokenExchangeRequest(public_token=public_token)
 
             logger.info("Exchanging public token for access token")
-            response = self.client.item_public_token_exchange(request)
+            response = await asyncio.to_thread(self.client.item_public_token_exchange, request)
 
             logger.info(f"Token exchanged successfully, item_id: {response.item_id}")
 
@@ -257,7 +258,7 @@ class PlaidClient:
             request = AccountsGetRequest(access_token=access_token)
 
             logger.info(f"Fetching accounts for access token: {self._mask_token(access_token)}")
-            response = self.client.accounts_get(request)
+            response = await asyncio.to_thread(self.client.accounts_get, request)
 
             logger.info(f"Fetched {len(response.accounts)} accounts")
 
@@ -319,7 +320,7 @@ class PlaidClient:
             sync_type = "initial" if cursor is None else "incremental"
             logger.info(f"Syncing transactions ({sync_type}): {self._mask_token(access_token)}")
 
-            response = self.client.transactions_sync(request)
+            response = await asyncio.to_thread(self.client.transactions_sync, request)
 
             logger.info(
                 f"Transaction sync complete: "
@@ -376,7 +377,7 @@ class PlaidClient:
             request = ItemGetRequest(access_token=access_token)
 
             logger.info(f"Fetching item details: {self._mask_token(access_token)}")
-            response = self.client.item_get(request)
+            response = await asyncio.to_thread(self.client.item_get, request)
 
             logger.info(f"Item details fetched: item_id={response.item.item_id}")
 
@@ -413,9 +414,9 @@ class PlaidClient:
             request = ItemRemoveRequest(access_token=access_token)
 
             logger.info(f"Removing item: {self._mask_token(access_token)}")
-            response = self.client.item_remove(request)
+            response = await asyncio.to_thread(self.client.item_remove, request)
 
-            logger.info(f"Item removed successfully")
+            logger.info("Item removed successfully")
 
             return {
                 "request_id": response.request_id
@@ -467,7 +468,7 @@ class PlaidClient:
         Returns:
             Masked token string
         """
-        if not token or len(token) < 12:
+        if not token or len(token) <= 12:
             return "***"
         return f"{token[:8]}...{token[-4:]}"
 

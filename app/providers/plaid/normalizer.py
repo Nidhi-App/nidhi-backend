@@ -6,7 +6,7 @@ data structures to our unified data models. This abstraction layer allows
 us to work with provider-agnostic models throughout the application.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Any, Optional
 from uuid import UUID
@@ -75,8 +75,8 @@ class PlaidItemNormalizer:
             connection_status=ConnectionStatus.PENDING,  # Pending until accounts are fetched
             institution_id=institution_id,
             institution_name=institution_name,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
 
     @staticmethod
@@ -136,7 +136,7 @@ class PlaidItemNormalizer:
             if connection.connection_status in [ConnectionStatus.PENDING, ConnectionStatus.ERROR]:
                 connection.connection_status = ConnectionStatus.ACTIVE
 
-        connection.updated_at = datetime.utcnow()
+        connection.updated_at = datetime.now(timezone.utc)
 
         logger.debug(
             f"Updated connection from Plaid item: {plaid_item.get('item_id')} -> "
@@ -164,7 +164,7 @@ class PlaidItemNormalizer:
         """
         connection.institution_id = institution_id
         connection.institution_name = institution_name
-        connection.updated_at = datetime.utcnow()
+        connection.updated_at = datetime.now(timezone.utc)
         return connection
 
     @staticmethod
@@ -180,7 +180,7 @@ class PlaidItemNormalizer:
             Connection: Updated connection
         """
         connection.connection_status = ConnectionStatus.NEEDS_REAUTH
-        connection.updated_at = datetime.utcnow()
+        connection.updated_at = datetime.now(timezone.utc)
 
         logger.warning(
             f"Connection {connection.connection_id} marked as needs reauth: {error_message}"
@@ -201,7 +201,7 @@ class PlaidItemNormalizer:
             Connection: Updated connection
         """
         connection.connection_status = ConnectionStatus.REVOKED
-        connection.updated_at = datetime.utcnow()
+        connection.updated_at = datetime.now(timezone.utc)
 
         logger.info(
             f"Connection {connection.connection_id} revoked: {reason or 'User initiated'}"
@@ -269,7 +269,7 @@ class PlaidAccountNormalizer:
             currency = balances.get("iso_currency_code") or balances.get("unofficial_currency_code") or "USD"
 
             # Extract balances (convert to Decimal for precision)
-            current_balance = Decimal(str(balances.get("current", 0))) if balances.get("current") is not None else None
+            current_balance = Decimal(str(balances.get("current"))) if balances.get("current") is not None else None
             available_balance = Decimal(str(balances.get("available"))) if balances.get("available") is not None else None
             credit_limit = Decimal(str(balances.get("limit"))) if balances.get("limit") is not None else None
 
@@ -306,9 +306,9 @@ class PlaidAccountNormalizer:
                 holder_category=holder_category,
                 provider_metadata=provider_metadata,
                 account_status=AccountStatus.ACTIVE,
-                last_refreshed_at=datetime.utcnow(),
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                last_refreshed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
             )
 
             logger.debug(
@@ -508,8 +508,8 @@ class PlaidTransactionNormalizer:
                 check_number=plaid_txn.get("check_number"),
                 provider_metadata=provider_metadata,
                 raw_payload=plaid_txn,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
             )
 
             logger.debug(
