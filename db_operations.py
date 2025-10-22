@@ -5,6 +5,7 @@ Handles all CRUD operations for providers, connections, accounts, and transactio
 
 import os
 from typing import List, Dict, Any, Optional
+from uuid import UUID
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -105,7 +106,7 @@ class DatabaseOperations:
 
         raise Exception("Failed to create account")
 
-    def create_accounts_batch(self, accounts_data: List[Dict[str, Any]]) -> List[int]:
+    def create_accounts_batch(self, accounts_data: List[Dict[str, Any]]) -> List[UUID]:
         """
         Batch insert accounts
 
@@ -113,12 +114,12 @@ class DatabaseOperations:
             accounts_data: List of account data dictionaries
 
         Returns:
-            List of account IDs
+            List of account UUIDs
         """
         response = self.supabase.table("accounts").insert(accounts_data).execute()
 
         if response.data:
-            return [account["account_id"] for account in response.data]
+            return [UUID(str(account["account_id"])) for account in response.data]
 
         raise Exception("Failed to create accounts")
 
@@ -142,17 +143,17 @@ class DatabaseOperations:
 
         return response.data if response.data else []
 
-    def get_account_by_id(self, account_id: int) -> Optional[Dict[str, Any]]:
+    def get_account_by_id(self, account_id: UUID) -> Optional[Dict[str, Any]]:
         """
         Get account by ID
 
         Args:
-            account_id: Account ID
+            account_id: Account UUID
 
         Returns:
             Account data or None
         """
-        response = self.supabase.table("accounts").select("*").eq("account_id", account_id).execute()
+        response = self.supabase.table("accounts").select("*").eq("account_id", str(account_id)).execute()
 
         if response.data and len(response.data) > 0:
             return response.data[0]
@@ -335,21 +336,24 @@ class DatabaseOperations:
 
         return response.data is not None and len(response.data) > 0
 
-    def verify_accounts_ownership(self, account_ids: List[int], user_id: str) -> bool:
+    def verify_accounts_ownership(self, account_ids: List[UUID], user_id: str) -> bool:
         """
         Verify that all accounts belong to a user
 
         Args:
-            account_ids: List of account IDs
+            account_ids: List of account UUIDs
             user_id: User UUID
 
         Returns:
             True if all accounts belong to user, False otherwise
         """
+        # Convert UUIDs to strings for Supabase query
+        account_id_strings = [str(aid) for aid in account_ids]
+
         response = (
             self.supabase.table("accounts")
             .select("account_id")
-            .in_("account_id", account_ids)
+            .in_("account_id", account_id_strings)
             .eq("user_id", user_id)
             .execute()
         )

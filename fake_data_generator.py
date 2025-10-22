@@ -6,7 +6,8 @@ Uses Faker library to generate realistic financial data
 import random
 import json
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
+from uuid import UUID
 from faker import Faker
 
 from banks_config import (
@@ -124,7 +125,7 @@ class FakeDataGenerator:
 
     def generate_transactions_for_account(
         self,
-        account_id: int,
+        account_id: Union[UUID, str],
         account_type: str,
         account_subtype: str,
         current_balance: float,

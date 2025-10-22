@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from uuid import UUID
 import logging
 
 from banks_config import get_all_banks, get_bank_by_code
@@ -46,11 +47,11 @@ class BankConnectRequest(BaseModel):
 
 class AccountSelectRequest(BaseModel):
     user_id: str = Field(..., description="User UUID from Supabase Auth")
-    account_ids: List[int] = Field(..., description="List of account IDs to select")
+    account_ids: List[UUID] = Field(..., description="List of account UUIDs to select")
 
 
 class AccountResponse(BaseModel):
-    account_id: int
+    account_id: UUID
     name: str
     mask: Optional[str]
     account_type: str
