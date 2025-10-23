@@ -1,0 +1,29 @@
+Next Development Steps
+
+1. Caching Optimization
+
+    - Implement caching mechanisms (refer to caching_strategies.md) to reduce redundant LLM calls and improve response latency.
+
+2. Chatbot Evaluation
+
+    - Test chatbot performance using the curated queries dataset.
+
+    - Develop and integrate evaluation metrics and automated evals for response quality, latency, and relevance.
+
+3. Enhanced User Experience
+
+    - Incorporate visualizations (charts, graphs, or interactive UI elements) into chatbot responses for better insight delivery.
+
+4. Architecture Finalization
+
+    - Review and finalize the chatbot architecture.
+
+    - Optimize or replace components for scalability and performance.
+
+    - Integrate observability tools (e.g., Maxim AI) for real-time monitoring, logging, and performance tracking.
+
+5. Extended Capabilities
+
+    - Add basic web search functionality to enhance factual accuracy and provide up-to-date information.
+
+    - Implement an intent classifier at the beginning of the pipeline to route queries effectively (e.g., to LLM, search, or visualization modules).

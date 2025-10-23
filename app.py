@@ -14,6 +14,9 @@ from banks_config import get_all_banks, get_bank_by_code
 from fake_data_generator import FakeDataGenerator
 from db_operations import DatabaseOperations
 
+# Import text2sql pipeline
+from text2sql.core.pipeline import get_pipeline
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,6 +40,14 @@ app.add_middleware(
 # Initialize services
 data_generator = FakeDataGenerator()
 db_ops = DatabaseOperations()
+
+# Initialize text2sql pipeline
+try:
+    text2sql_pipeline = get_pipeline()
+    logger.info("✅ Text2SQL chatbot pipeline initialized")
+except Exception as e:
+    logger.warning(f"⚠️  Text2SQL initialization failed: {e}")
+    text2sql_pipeline = None
 
 
 # Pydantic models for request/response validation
@@ -80,6 +91,25 @@ class AccountSummaryResponse(BaseModel):
     total_accounts: int
     total_balance: float
     accounts: List[dict]
+
+
+# Text2SQL Chatbot Models
+class ChatQueryRequest(BaseModel):
+    user_id: str = Field(..., description="User UUID from Supabase Auth")
+    query: str = Field(..., description="Natural language query", max_length=500)
+    context: Optional[str] = Field(None, description="Additional context")
+
+
+class ChatQueryResponse(BaseModel):
+    success: bool
+    user_query: str
+    generated_sql: Optional[str] = None
+    results: Optional[List[dict]] = None
+    columns: Optional[List[str]] = None
+    row_count: int = 0
+    execution_time: float = 0
+    natural_language_response: Optional[str] = None
+    error: Optional[str] = None
 
 
 # API Endpoints
@@ -428,10 +458,149 @@ async def get_accounts_summary(user_id: str):
         )
 
 
+@app.post("/api/chat/query", response_model=ChatQueryResponse)
+async def chat_query(request: ChatQueryRequest):
+    """
+    Text2SQL Chatbot endpoint
+
+    Converts natural language queries to SQL and executes them against the database
+
+    Args:
+        request: ChatQueryRequest with user_id and natural language query
+
+    Returns:
+        ChatQueryResponse with SQL, results, and natural language response
+    """
+    try:
+        if not text2sql_pipeline:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Text2SQL chatbot is not available. OpenAI API key may be missing.",
+            )
+
+        logger.info(f"💬 Chat query from user {request.user_id}: '{request.query}'")
+
+        # Process query through the pipeline
+        result = text2sql_pipeline.process_query(
+            user_query=request.query,
+            user_id=request.user_id,
+            context=request.context or "",
+            skip_validation=True  # Skip validation for faster responses
+        )
+
+        if not result['success']:
+            logger.error(f"Pipeline failed: {result.get('error')}")
+            return ChatQueryResponse(
+                success=False,
+                user_query=request.query,
+                error=result.get('error', 'Unknown error occurred')
+            )
+
+        # Convert results to list of dicts for easier JSON serialization
+        results_list = []
+        query_result = result.get('query_result', {})
+        if query_result.get('rows') and query_result.get('columns'):
+            for row in query_result['rows']:
+                row_dict = {}
+                for i, col in enumerate(query_result['columns']):
+                    row_dict[col] = row[i]
+                results_list.append(row_dict)
+
+        return ChatQueryResponse(
+            success=True,
+            user_query=request.query,
+            generated_sql=result.get('sql'),
+            results=results_list,
+            columns=query_result.get('columns', []),
+            row_count=query_result.get('row_count', 0),
+            execution_time=query_result.get('execution_time', 0),
+            natural_language_response=result.get('response', 'Query executed successfully.')
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat query error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process chat query: {str(e)}"
+        )
+
+
+def _generate_nl_response(query: str, results: List[dict], row_count: int) -> str:
+    """
+    Generate a natural language response from query results
+
+    Args:
+        query: Original user query
+        results: Query results
+        row_count: Number of rows returned
+
+    Returns:
+        Natural language response string
+    """
+    if row_count == 0:
+        return "I couldn't find any results for your query."
+
+    # Simple response generation based on query patterns
+    query_lower = query.lower()
+
+    # Handle COUNT queries
+    if "how many" in query_lower or "count" in query_lower:
+        if results and len(results) > 0:
+            # Get the count value (should be the first value in the first row)
+            count_value = list(results[0].values())[0]
+
+            # Determine what we're counting
+            if "transaction" in query_lower:
+                return f"You have {count_value:,} transactions across your accounts."
+            elif "account" in query_lower:
+                return f"You have {count_value} accounts."
+            else:
+                return f"The count is {count_value:,}."
+
+    # Handle SUM/TOTAL queries
+    if "total" in query_lower or "sum" in query_lower:
+        if results and len(results) > 0:
+            total_value = list(results[0].values())[0]
+
+            if "balance" in query_lower:
+                return f"Your total balance is ${total_value:,.2f}."
+            elif "spent" in query_lower or "spending" in query_lower:
+                return f"You've spent ${abs(total_value):,.2f}."
+            else:
+                return f"The total is ${total_value:,.2f}."
+
+    # Handle account listing
+    if "account" in query_lower and ("show" in query_lower or "list" in query_lower):
+        if row_count == 1:
+            return f"You have 1 account."
+        else:
+            return f"You have {row_count} accounts."
+
+    # Handle transaction listing
+    if "transaction" in query_lower and ("show" in query_lower or "list" in query_lower or "recent" in query_lower):
+        if row_count == 1:
+            return f"Here is 1 transaction."
+        else:
+            return f"Here are {row_count} transactions."
+
+    # Default responses
+    if row_count == 1:
+        return f"I found 1 result."
+    else:
+        return f"I found {row_count} results."
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "nidhi-fi-backend"}
+    chatbot_status = "enabled" if (sql_generator and text2sql_db) else "disabled"
+    return {
+        "status": "healthy",
+        "service": "nidhi-fi-backend",
+        "text2sql_chatbot": chatbot_status
+    }
 
 
 # Error handlers
