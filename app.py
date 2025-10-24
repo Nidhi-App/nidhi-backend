@@ -6,9 +6,11 @@ Provides REST API endpoints for bank selection, account generation, and transact
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Any
 from uuid import UUID
 import logging
+from decimal import Decimal
+from datetime import datetime, date
 
 from banks_config import get_all_banks, get_bank_by_code
 from fake_data_generator import FakeDataGenerator
@@ -16,6 +18,10 @@ from db_operations import DatabaseOperations
 
 # Import text2sql pipeline
 from text2sql.core.pipeline import get_pipeline
+from text2sql.cache import get_cache_manager
+
+# Import conversation utilities
+from conversation_utils import generate_conversation_title
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -98,6 +104,7 @@ class ChatQueryRequest(BaseModel):
     user_id: str = Field(..., description="User UUID from Supabase Auth")
     query: str = Field(..., description="Natural language query", max_length=500)
     context: Optional[str] = Field(None, description="Additional context")
+    conversation_id: Optional[str] = Field(None, description="Optional conversation ID for multi-turn conversations")
 
 
 class ChatQueryResponse(BaseModel):
@@ -110,6 +117,53 @@ class ChatQueryResponse(BaseModel):
     execution_time: float = 0
     natural_language_response: Optional[str] = None
     error: Optional[str] = None
+    conversation_id: Optional[str] = None  # Added for conversation tracking
+
+
+# Conversation Models
+class ConversationCreateRequest(BaseModel):
+    user_id: str = Field(..., description="User UUID from Supabase Auth")
+    title: Optional[str] = Field(None, description="Optional conversation title")
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: str = Field(..., description="New title for the conversation")
+
+
+class ConversationResponse(BaseModel):
+    conversation_id: str
+    user_id: str
+    title: Optional[str]
+    created_at: str
+    updated_at: str
+    last_message_at: Optional[str]
+    is_archived: bool
+    message_count: Optional[int] = None
+
+
+class ConversationListResponse(BaseModel):
+    total: int
+    conversations: List[ConversationResponse]
+
+
+class MessageResponse(BaseModel):
+    message_id: str
+    conversation_id: str
+    role: str
+    content: str
+    sql_query: Optional[str]
+    query_results_summary: Optional[dict]
+    execution_time: Optional[float]
+    error: Optional[str]
+    model_version: Optional[str]
+    metadata: Optional[dict]
+    created_at: str
+
+
+class ConversationMessagesResponse(BaseModel):
+    conversation_id: str
+    total_messages: int
+    messages: List[MessageResponse]
 
 
 # API Endpoints
@@ -458,18 +512,53 @@ async def get_accounts_summary(user_id: str):
         )
 
 
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def make_json_serializable(obj: Any) -> Any:
+    """
+    Recursively convert an object to JSON-serializable format
+
+    Handles:
+    - Decimal -> float
+    - datetime/date -> ISO format string
+    - dict/list -> recursively convert values
+
+    Args:
+        obj: Object to convert
+
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    else:
+        return obj
+
+
+# ============================================================================
+# TEXT2SQL CHATBOT ENDPOINTS
+# ============================================================================
+
 @app.post("/api/chat/query", response_model=ChatQueryResponse)
 async def chat_query(request: ChatQueryRequest):
     """
-    Text2SQL Chatbot endpoint
+    Text2SQL Chatbot endpoint with conversation storage
 
-    Converts natural language queries to SQL and executes them against the database
+    Converts natural language queries to SQL, executes them, and stores conversation history
 
     Args:
-        request: ChatQueryRequest with user_id and natural language query
+        request: ChatQueryRequest with user_id, query, and optional conversation_id
 
     Returns:
-        ChatQueryResponse with SQL, results, and natural language response
+        ChatQueryResponse with SQL, results, natural language response, and conversation_id
     """
     try:
         if not text2sql_pipeline:
@@ -480,32 +569,172 @@ async def chat_query(request: ChatQueryRequest):
 
         logger.info(f"💬 Chat query from user {request.user_id}: '{request.query}'")
 
-        # Process query through the pipeline
+        # =====================================================================
+        # Step 1: Get or create conversation
+        # =====================================================================
+        conversation_id = request.conversation_id
+        is_new_conversation = False
+
+        if not conversation_id:
+            # Create new conversation
+            try:
+                conversation = db_ops.create_conversation(
+                    user_id=request.user_id,
+                    title=None  # Will be generated after processing
+                )
+                conversation_id = str(conversation["conversation_id"])
+                is_new_conversation = True
+                logger.info(f"✨ Created new conversation: {conversation_id}")
+            except Exception as e:
+                logger.error(f"Failed to create conversation: {e}")
+                # Continue without conversation storage
+                conversation_id = None
+        else:
+            # Verify conversation exists and belongs to user
+            conv = db_ops.get_conversation_by_id(conversation_id, request.user_id)
+            if not conv:
+                logger.warning(f"Conversation {conversation_id} not found or unauthorized")
+                conversation_id = None
+
+        # =====================================================================
+        # Step 2: Get conversation context for follow-up questions
+        # =====================================================================
+        context_messages = ""
+        if conversation_id and not is_new_conversation:
+            try:
+                last_messages = db_ops.get_last_n_messages(
+                    conversation_id=conversation_id,
+                    user_id=request.user_id,
+                    n=10  # Last 10 messages for context
+                )
+                # Build context from previous messages
+                context_parts = []
+                for msg in last_messages:
+                    if msg["role"] == "user":
+                        context_parts.append(f"User: {msg['content']}")
+                    elif msg["role"] == "assistant" and msg.get("sql_query"):
+                        context_parts.append(f"SQL: {msg['sql_query']}")
+                context_messages = "\n".join(context_parts)
+                logger.info(f"📜 Retrieved {len(last_messages)} messages for context")
+            except Exception as e:
+                logger.error(f"Failed to get conversation context: {e}")
+
+        # Combine with provided context
+        full_context = f"{context_messages}\n{request.context or ''}".strip()
+
+        # =====================================================================
+        # Step 3: Store user message
+        # =====================================================================
+        user_message_id = None
+        if conversation_id:
+            try:
+                user_msg = db_ops.add_message(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=request.query,
+                    metadata={"source": "chat_endpoint"}
+                )
+                user_message_id = str(user_msg["message_id"])
+                logger.info(f"💾 Stored user message: {user_message_id}")
+            except Exception as e:
+                logger.error(f"Failed to store user message: {e}")
+
+        # =====================================================================
+        # Step 4: Process query through the pipeline
+        # =====================================================================
         result = text2sql_pipeline.process_query(
             user_query=request.query,
             user_id=request.user_id,
-            context=request.context or "",
+            context=full_context,
             skip_validation=True  # Skip validation for faster responses
         )
 
         if not result['success']:
             logger.error(f"Pipeline failed: {result.get('error')}")
+
+            # Store error message
+            if conversation_id:
+                try:
+                    db_ops.add_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=result.get('error', 'Unknown error occurred'),
+                        error=result.get('error'),
+                        metadata={"error": True}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to store error message: {e}")
+
             return ChatQueryResponse(
                 success=False,
                 user_query=request.query,
-                error=result.get('error', 'Unknown error occurred')
+                error=result.get('error', 'Unknown error occurred'),
+                conversation_id=conversation_id
             )
 
-        # Convert results to list of dicts for easier JSON serialization
+        # =====================================================================
+        # Step 5: Format results
+        # =====================================================================
         results_list = []
         query_result = result.get('query_result', {})
         if query_result.get('rows') and query_result.get('columns'):
             for row in query_result['rows']:
                 row_dict = {}
                 for i, col in enumerate(query_result['columns']):
-                    row_dict[col] = row[i]
+                    # Convert to JSON-serializable format
+                    row_dict[col] = make_json_serializable(row[i])
                 results_list.append(row_dict)
 
+        # =====================================================================
+        # Step 6: Store assistant response
+        # =====================================================================
+        if conversation_id:
+            try:
+                # Create results summary (row_count + first 5 rows)
+                results_summary = {
+                    "row_count": query_result.get('row_count', 0),
+                    "sample_rows": results_list[:5] if results_list else []
+                }
+
+                # Get cache hit info from result metadata
+                cache_hit = result.get('metadata', {}).get('cache_hit', False)
+
+                db_ops.add_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=result.get('response', 'Query executed successfully.'),
+                    sql_query=result.get('sql'),
+                    sql_params=[request.user_id],  # Parameters used in query
+                    query_results_summary=results_summary,
+                    execution_time=query_result.get('execution_time', 0),
+                    model_version=result.get('model_used', 'unknown'),
+                    metadata={
+                        "cache_hit": cache_hit,
+                        "column_count": len(query_result.get('columns', [])),
+                    }
+                )
+                logger.info(f"💾 Stored assistant response")
+            except Exception as e:
+                logger.error(f"Failed to store assistant message: {e}")
+
+        # =====================================================================
+        # Step 7: Generate title for new conversation
+        # =====================================================================
+        if conversation_id and is_new_conversation:
+            try:
+                title = generate_conversation_title(request.query)
+                db_ops.update_conversation_title(
+                    conversation_id=conversation_id,
+                    user_id=request.user_id,
+                    title=title
+                )
+                logger.info(f"📝 Generated title: '{title}'")
+            except Exception as e:
+                logger.error(f"Failed to generate title: {e}")
+
+        # =====================================================================
+        # Step 8: Return response
+        # =====================================================================
         return ChatQueryResponse(
             success=True,
             user_query=request.query,
@@ -514,7 +743,8 @@ async def chat_query(request: ChatQueryRequest):
             columns=query_result.get('columns', []),
             row_count=query_result.get('row_count', 0),
             execution_time=query_result.get('execution_time', 0),
-            natural_language_response=result.get('response', 'Query executed successfully.')
+            natural_language_response=result.get('response', 'Query executed successfully.'),
+            conversation_id=conversation_id
         )
 
     except HTTPException:
@@ -592,6 +822,373 @@ def _generate_nl_response(query: str, results: List[dict], row_count: int) -> st
         return f"I found {row_count} results."
 
 
+# ============================================================================
+# Conversation API Endpoints
+# ============================================================================
+
+@app.post("/api/conversations", response_model=ConversationResponse)
+async def create_conversation(request: ConversationCreateRequest):
+    """
+    Create a new conversation
+
+    Args:
+        request: Conversation create request with user_id and optional title
+
+    Returns:
+        Created conversation data
+    """
+    try:
+        # Create conversation
+        conversation = db_ops.create_conversation(
+            user_id=request.user_id,
+            title=request.title
+        )
+
+        logger.info(f"✅ Created conversation {conversation['conversation_id']} for user {request.user_id}")
+
+        return ConversationResponse(
+            conversation_id=str(conversation["conversation_id"]),
+            user_id=str(conversation["user_id"]),
+            title=conversation.get("title"),
+            created_at=str(conversation["created_at"]),
+            updated_at=str(conversation["updated_at"]),
+            last_message_at=str(conversation["last_message_at"]) if conversation.get("last_message_at") else None,
+            is_archived=conversation.get("is_archived", False)
+        )
+
+    except Exception as e:
+        logger.error(f"Error creating conversation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create conversation: {str(e)}"
+        )
+
+
+@app.get("/api/conversations", response_model=ConversationListResponse)
+async def list_conversations(
+    user_id: str,
+    include_archived: bool = False,
+    limit: int = 50,
+    offset: int = 0
+):
+    """
+    List conversations for a user with pagination
+
+    Args:
+        user_id: User UUID
+        include_archived: Include archived conversations
+        limit: Maximum conversations to return
+        offset: Pagination offset
+
+    Returns:
+        List of conversations
+    """
+    try:
+        conversations = db_ops.get_user_conversations(
+            user_id=user_id,
+            include_archived=include_archived,
+            limit=limit,
+            offset=offset
+        )
+
+        # Format conversations with message count
+        formatted_conversations = []
+        for conv in conversations:
+            message_count = db_ops.get_conversation_message_count(
+                conversation_id=str(conv["conversation_id"]),
+                user_id=user_id
+            )
+
+            formatted_conversations.append(ConversationResponse(
+                conversation_id=str(conv["conversation_id"]),
+                user_id=str(conv["user_id"]),
+                title=conv.get("title"),
+                created_at=str(conv["created_at"]),
+                updated_at=str(conv["updated_at"]),
+                last_message_at=str(conv["last_message_at"]) if conv.get("last_message_at") else None,
+                is_archived=conv.get("is_archived", False),
+                message_count=message_count
+            ))
+
+        return ConversationListResponse(
+            total=len(formatted_conversations),
+            conversations=formatted_conversations
+        )
+
+    except Exception as e:
+        logger.error(f"Error listing conversations: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list conversations: {str(e)}"
+        )
+
+
+@app.get("/api/conversations/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(conversation_id: str, user_id: str):
+    """
+    Get a specific conversation by ID
+
+    Args:
+        conversation_id: Conversation UUID
+        user_id: User UUID (for ownership verification)
+
+    Returns:
+        Conversation data
+    """
+    try:
+        conversation = db_ops.get_conversation_by_id(
+            conversation_id=conversation_id,
+            user_id=user_id
+        )
+
+        if not conversation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found or unauthorized"
+            )
+
+        message_count = db_ops.get_conversation_message_count(
+            conversation_id=conversation_id,
+            user_id=user_id
+        )
+
+        return ConversationResponse(
+            conversation_id=str(conversation["conversation_id"]),
+            user_id=str(conversation["user_id"]),
+            title=conversation.get("title"),
+            created_at=str(conversation["created_at"]),
+            updated_at=str(conversation["updated_at"]),
+            last_message_at=str(conversation["last_message_at"]) if conversation.get("last_message_at") else None,
+            is_archived=conversation.get("is_archived", False),
+            message_count=message_count
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching conversation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch conversation: {str(e)}"
+        )
+
+
+@app.get("/api/conversations/{conversation_id}/messages", response_model=ConversationMessagesResponse)
+async def get_conversation_messages(
+    conversation_id: str,
+    user_id: str,
+    limit: int = 50,
+    offset: int = 0
+):
+    """
+    Get messages for a conversation with pagination
+
+    Args:
+        conversation_id: Conversation UUID
+        user_id: User UUID (for ownership verification)
+        limit: Maximum messages to return
+        offset: Pagination offset
+
+    Returns:
+        List of messages
+    """
+    try:
+        messages = db_ops.get_conversation_messages(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            order_desc=False  # Chronological order
+        )
+
+        formatted_messages = [
+            MessageResponse(
+                message_id=str(msg["message_id"]),
+                conversation_id=str(msg["conversation_id"]),
+                role=msg["role"],
+                content=msg["content"],
+                sql_query=msg.get("sql_query"),
+                query_results_summary=msg.get("query_results_summary"),
+                execution_time=float(msg["execution_time"]) if msg.get("execution_time") else None,
+                error=msg.get("error"),
+                model_version=msg.get("model_version"),
+                metadata=msg.get("metadata", {}),
+                created_at=str(msg["created_at"])
+            )
+            for msg in messages
+        ]
+
+        total_count = db_ops.get_conversation_message_count(
+            conversation_id=conversation_id,
+            user_id=user_id
+        )
+
+        return ConversationMessagesResponse(
+            conversation_id=conversation_id,
+            total_messages=total_count,
+            messages=formatted_messages
+        )
+
+    except Exception as e:
+        logger.error(f"Error fetching messages: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch messages: {str(e)}"
+        )
+
+
+@app.put("/api/conversations/{conversation_id}")
+async def update_conversation(
+    conversation_id: str,
+    user_id: str,
+    request: ConversationUpdateRequest
+):
+    """
+    Update conversation title
+
+    Args:
+        conversation_id: Conversation UUID
+        user_id: User UUID (for ownership verification)
+        request: Update request with new title
+
+    Returns:
+        Success message
+    """
+    try:
+        success = db_ops.update_conversation_title(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            title=request.title
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found or unauthorized"
+            )
+
+        return {"success": True, "message": "Conversation title updated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating conversation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update conversation: {str(e)}"
+        )
+
+
+@app.post("/api/conversations/{conversation_id}/archive")
+async def archive_conversation(conversation_id: str, user_id: str):
+    """
+    Archive a conversation
+
+    Args:
+        conversation_id: Conversation UUID
+        user_id: User UUID (for ownership verification)
+
+    Returns:
+        Success message
+    """
+    try:
+        success = db_ops.archive_conversation(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            archived=True
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found or unauthorized"
+            )
+
+        return {"success": True, "message": "Conversation archived"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error archiving conversation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to archive conversation: {str(e)}"
+        )
+
+
+@app.post("/api/conversations/{conversation_id}/unarchive")
+async def unarchive_conversation(conversation_id: str, user_id: str):
+    """
+    Unarchive a conversation
+
+    Args:
+        conversation_id: Conversation UUID
+        user_id: User UUID (for ownership verification)
+
+    Returns:
+        Success message
+    """
+    try:
+        success = db_ops.archive_conversation(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            archived=False
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found or unauthorized"
+            )
+
+        return {"success": True, "message": "Conversation unarchived"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unarchiving conversation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to unarchive conversation: {str(e)}"
+        )
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str, user_id: str):
+    """
+    Soft delete a conversation
+
+    Args:
+        conversation_id: Conversation UUID
+        user_id: User UUID (for ownership verification)
+
+    Returns:
+        Success message
+    """
+    try:
+        success = db_ops.delete_conversation(
+            conversation_id=conversation_id,
+            user_id=user_id
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found or unauthorized"
+            )
+
+        return {"success": True, "message": "Conversation deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting conversation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete conversation: {str(e)}"
+        )
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -601,6 +1198,67 @@ async def health_check():
         "service": "nidhi-fi-backend",
         "text2sql_chatbot": chatbot_status
     }
+
+
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    """
+    Get cache statistics
+
+    Returns comprehensive caching metrics including:
+    - Hit/miss rates
+    - Total cached items
+    - Cache backend information
+    - Performance metrics
+
+    Returns:
+        Cache statistics dictionary
+    """
+    try:
+        cache_manager = get_cache_manager()
+        stats = cache_manager.get_detailed_stats()
+
+        # Add helpful metrics
+        if stats.get("enabled", False):
+            total_requests = stats.get("total_requests", 0)
+            if total_requests > 0:
+                stats["cache_effectiveness"] = f"{stats.get('hit_rate', 0) * 100:.1f}%"
+                stats["estimated_time_saved"] = f"{stats.get('hits', 0) * 10:.1f}s"  # Assuming ~10s per LLM call
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Error fetching cache stats: {e}")
+        return {"error": "Failed to fetch cache stats", "detail": str(e)}
+
+
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """
+    Clear all cache entries
+
+    WARNING: This will invalidate all cached responses
+    Use with caution in production
+
+    Returns:
+        Success status
+    """
+    try:
+        cache_manager = get_cache_manager()
+        cache_manager.clear()
+        logger.info("🗑️  Cache cleared via API")
+
+        return {
+            "success": True,
+            "message": "Cache cleared successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clear cache: {str(e)}"
+        )
 
 
 # Error handlers

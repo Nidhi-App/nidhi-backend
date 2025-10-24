@@ -85,6 +85,12 @@ Table: accounts
 - created_at (timestamp with time zone)
 - last_refreshed_at (timestamp with time zone)
 
+IMPORTANT NOTE ON ACCOUNTS:
+- Users select specific accounts during onboarding from a list of available accounts
+- Only selected accounts have transactions
+- When user asks for "my accounts", return ONLY accounts that have transactions
+- Non-selected accounts exist in the database but have 0 transactions
+
 Table: transactions
 -------------------
 - transaction_id (uuid, primary key)
@@ -162,11 +168,11 @@ CRITICAL RULES FOR SQL GENERATION:
    - Format currency amounts appropriately
 
 6. COMMON QUERY PATTERNS:
-   - "my accounts" → SELECT from accounts WHERE user_id = %s
+   - "my accounts" → SELECT DISTINCT accounts WHERE user has transactions (JOIN with transactions)
    - "transactions" → JOIN transactions with accounts, filter by user_id
    - "spending" → SUM(amount) WHERE txn_direction = 'Debit'
    - "income" → SUM(amount) WHERE txn_direction = 'Credit'
-   - "balance" → SELECT current_balance from accounts
+   - "balance" → SELECT current_balance from accounts (only selected accounts)
 
 7. DATE FILTERING:
    - Use txn_date for transaction date queries
@@ -176,8 +182,11 @@ CRITICAL RULES FOR SQL GENERATION:
 Example Queries:
 ----------------
 User: "Show me my accounts"
-SQL: SELECT account_id, name, account_type, current_balance, currency, institution_name
-     FROM accounts WHERE user_id = %s ORDER BY current_balance DESC;
+SQL: SELECT DISTINCT a.account_id, a.name, a.account_type, a.current_balance, a.currency, a.institution_name
+     FROM accounts a
+     INNER JOIN transactions t ON a.account_id = t.account_id
+     WHERE a.user_id = %s
+     ORDER BY a.current_balance DESC;
 
 User: "What's my total spending this month?"
 SQL: SELECT SUM(amount) as total_spending

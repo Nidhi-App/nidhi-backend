@@ -9,6 +9,8 @@ from typing import Dict, Any, Tuple, Optional
 from .base_function import BaseFunction
 from ..config import Text2SQLConfig, get_schema_info
 from ..core.exceptions import SQLGenerationError, OpenAIAPIError, OpenAIConnectionError
+from ..cache import get_cache_manager
+from ..cache.normalization import normalize_query
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class SQLGenerator(BaseFunction):
         self.model = self.config.OPENAI_MODEL
         self.schema_info = get_schema_info()
         self.system_prompt = self._create_system_prompt()
+        self.cache_manager = get_cache_manager()
 
         if not self.openai_api_key:
             logger.warning("⚠️  OpenAI API key not found - SQL generation will fail")
@@ -96,6 +99,30 @@ class SQLGenerator(BaseFunction):
             Tuple of (sql_query, parameters)
         """
         try:
+            # Normalize query for better cache hits
+            normalized_query = normalize_query(user_query)
+            logger.debug(f"Normalized query: '{user_query}' → '{normalized_query}'")
+
+            # Create cache key for SQL generation using normalized query
+            cache_key = self.cache_manager.create_cache_key(
+                "sql_gen",
+                user_id,
+                normalized_query,  # Use normalized query instead of raw query
+                context=context,
+                model=self.model,
+                schema=self.schema_info[:200]  # Use first 200 chars of schema for cache key
+            )
+
+            # Check cache first
+            cached_result = self.cache_manager.get(cache_key)
+            if cached_result:
+                logger.info(f"✅ Cache HIT for SQL generation: {user_query}")
+                logger.info(f"   Matched normalized query: {normalized_query}")
+                return cached_result["sql"], cached_result["params"]
+
+            logger.info(f"❌ Cache MISS for SQL generation: {user_query}")
+            logger.info(f"   Normalized query: {normalized_query}")
+
             # Prepare the input for GPT-5 with user context
             full_context = f"{context}\n" if context else ""
             input_text = (
@@ -119,6 +146,18 @@ class SQLGenerator(BaseFunction):
 
             # Parameters (user_id is always the first parameter)
             params = (user_id,)
+
+            # Cache the result
+            cache_value = {
+                "sql": sql_query,
+                "params": params
+            }
+            self.cache_manager.set(
+                cache_key,
+                cache_value,
+                ttl=self.cache_manager.config.LLM_SQL_GENERATION_TTL
+            )
+            logger.info(f"📦 Cached SQL generation result for: {user_query}")
 
             return sql_query, params
 

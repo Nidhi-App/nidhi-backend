@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, Tuple
 from .base_function import BaseFunction
 from ..database import get_db_manager
 from ..core.exceptions import DatabaseExecutionError, ValidationError
+from ..cache import get_cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class SQLExecutor(BaseFunction):
     def __init__(self, db_manager=None):
         """
         Initialize SQL Executor
-        
+
         Args:
             db_manager: Database manager instance (uses global if not provided)
         """
@@ -31,17 +32,18 @@ class SQLExecutor(BaseFunction):
             required_inputs=["sql", "params"],
             optional_inputs=["user_id", "timeout", "fetch_results"]
         )
-        
+
         self.db_manager = db_manager or get_db_manager()
+        self.cache_manager = get_cache_manager()
         
     def execute(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         Execute SQL query safely
-        
+
         Args:
             input_data: Must contain 'sql' and 'params'
                        Optional: 'user_id', 'timeout', 'fetch_results'
-            
+
         Returns:
             Dict with 'success', 'rows', 'columns', 'row_count', and metadata
         """
@@ -49,33 +51,62 @@ class SQLExecutor(BaseFunction):
         params = input_data["params"]
         user_id = input_data.get("user_id")
         fetch_results = input_data.get("fetch_results", True)
-        
+
         # Validate inputs
         self._validate_sql_input(sql, params, user_id)
-        
+
+        query_type = self._get_query_type(sql)
+
+        # Only cache SELECT queries (not INSERT, UPDATE, DELETE)
+        should_cache = query_type == "SELECT" and user_id
+
+        if should_cache:
+            # Create cache key for SQL execution
+            cache_key = self.cache_manager.create_cache_key(
+                "sql_exec",
+                user_id,
+                sql,
+                params=str(params)
+            )
+
+            # Check cache first
+            cached_result = self.cache_manager.get(cache_key)
+            if cached_result:
+                logger.info(f"✅ Cache HIT for SQL execution")
+                return cached_result
+
+            logger.info(f"❌ Cache MISS for SQL execution")
+
         try:
             logger.info(f"🔄 Executing SQL query")
             logger.debug(f"SQL: {sql}")
             logger.debug(f"Params: {params}")
-            
+
             # Execute query using database manager
             result = self.db_manager.execute_raw_sql(
                 sql=sql,
                 params=params,
                 fetch_results=fetch_results
             )
-            
+
             # Add additional metadata
             result.update({
                 'user_id': user_id,
-                'query_type': self._get_query_type(sql),
+                'query_type': query_type,
                 'parameter_count': len(params) if params else 0
             })
-            
+
             logger.info(f"✅ SQL executed successfully - {result['row_count']} rows affected")
-            
+
+            # Cache the result if it's a SELECT query
+            if should_cache:
+                # Determine TTL based on query type
+                ttl = self.cache_manager.config.DYNAMIC_QUERY_TTL  # Default 5 minutes
+                self.cache_manager.set(cache_key, result, ttl=ttl)
+                logger.info(f"📦 Cached SQL execution result")
+
             return result
-            
+
         except DatabaseExecutionError:
             # Re-raise database errors as-is
             raise

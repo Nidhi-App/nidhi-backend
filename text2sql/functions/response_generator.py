@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 from .base_function import BaseFunction
 from ..config import Text2SQLConfig
 from ..core.exceptions import ResponseGenerationError, OpenAIConnectionError, OpenAIAPIError
+from ..cache import get_cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class ResponseGenerator(BaseFunction):
 
         self.config = Text2SQLConfig()
         self.openai_api_key = openai_api_key or self.config.OPENAI_API_KEY
+        self.cache_manager = get_cache_manager()
 
     def execute(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
@@ -104,6 +106,28 @@ class ResponseGenerator(BaseFunction):
             Generated natural language response
         """
         try:
+            # Get user_id from query_result if available
+            user_id = query_result.get("user_id", "unknown")
+
+            # Create cache key for response generation
+            # Use row count and column structure as part of cache key
+            result_summary = f"rows:{query_result.get('row_count', 0)}_cols:{len(query_result.get('columns', []))}"
+            cache_key = self.cache_manager.create_cache_key(
+                "response_gen",
+                user_id,
+                user_query,
+                result=result_summary,
+                context=context
+            )
+
+            # Check cache first
+            cached_response = self.cache_manager.get(cache_key)
+            if cached_response:
+                logger.info(f"✅ Cache HIT for response generation")
+                return cached_response
+
+            logger.info(f"❌ Cache MISS for response generation")
+
             # Prepare response generation prompt
             response_prompt = self._create_response_prompt(
                 user_query, query_result, validation_result, context
@@ -117,7 +141,17 @@ class ResponseGenerator(BaseFunction):
             if not response_text:
                 raise ResponseGenerationError("No response text received from OpenAI")
 
-            return response_text.strip()
+            response_text = response_text.strip()
+
+            # Cache the generated response
+            self.cache_manager.set(
+                cache_key,
+                response_text,
+                ttl=self.cache_manager.config.LLM_RESPONSE_TTL
+            )
+            logger.info(f"📦 Cached response generation result")
+
+            return response_text
 
         except Exception as e:
             logger.error(f"GPT response generation failed: {e}")

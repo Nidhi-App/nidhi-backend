@@ -359,3 +359,308 @@ class DatabaseOperations:
         )
 
         return response.data is not None and len(response.data) == len(account_ids)
+
+    # ========================================================================
+    # Conversation Operations
+    # ========================================================================
+
+    def create_conversation(
+        self, user_id: str, title: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a new conversation for a user
+
+        Args:
+            user_id: User UUID
+            title: Conversation title (optional, can be generated later)
+            metadata: Additional metadata (optional)
+
+        Returns:
+            Conversation data including conversation_id
+        """
+        conversation_data = {
+            "user_id": user_id,
+            "title": title,
+            "metadata": metadata or {},
+        }
+
+        response = self.supabase.table("conversations").insert(conversation_data).execute()
+
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+
+        raise Exception("Failed to create conversation")
+
+    def get_user_conversations(
+        self, user_id: str, include_archived: bool = False, limit: int = 50, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Get conversations for a user with pagination
+
+        Args:
+            user_id: User UUID
+            include_archived: Whether to include archived conversations
+            limit: Maximum number of conversations to return
+            offset: Offset for pagination
+
+        Returns:
+            List of conversations ordered by last_message_at DESC
+        """
+        query = (
+            self.supabase.table("conversations")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("is_deleted", False)
+        )
+
+        if not include_archived:
+            query = query.eq("is_archived", False)
+
+        response = (
+            query.order("last_message_at", desc=True)
+            .order("created_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
+
+        return response.data if response.data else []
+
+    def get_conversation_by_id(self, conversation_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a specific conversation by ID with ownership verification
+
+        Args:
+            conversation_id: Conversation UUID
+            user_id: User UUID (for ownership verification)
+
+        Returns:
+            Conversation data or None if not found/not authorized
+        """
+        response = (
+            self.supabase.table("conversations")
+            .select("*")
+            .eq("conversation_id", conversation_id)
+            .eq("user_id", user_id)
+            .eq("is_deleted", False)
+            .execute()
+        )
+
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+
+        return None
+
+    def update_conversation_title(self, conversation_id: str, user_id: str, title: str) -> bool:
+        """
+        Update conversation title
+
+        Args:
+            conversation_id: Conversation UUID
+            user_id: User UUID (for ownership verification)
+            title: New title
+
+        Returns:
+            True if updated successfully
+        """
+        response = (
+            self.supabase.table("conversations")
+            .update({"title": title})
+            .eq("conversation_id", conversation_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        return response.data is not None and len(response.data) > 0
+
+    def archive_conversation(self, conversation_id: str, user_id: str, archived: bool = True) -> bool:
+        """
+        Archive or unarchive a conversation
+
+        Args:
+            conversation_id: Conversation UUID
+            user_id: User UUID (for ownership verification)
+            archived: True to archive, False to unarchive
+
+        Returns:
+            True if updated successfully
+        """
+        response = (
+            self.supabase.table("conversations")
+            .update({"is_archived": archived})
+            .eq("conversation_id", conversation_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        return response.data is not None and len(response.data) > 0
+
+    def delete_conversation(self, conversation_id: str, user_id: str) -> bool:
+        """
+        Soft delete a conversation (sets is_deleted = True)
+
+        Args:
+            conversation_id: Conversation UUID
+            user_id: User UUID (for ownership verification)
+
+        Returns:
+            True if deleted successfully
+        """
+        response = (
+            self.supabase.table("conversations")
+            .update({"is_deleted": True})
+            .eq("conversation_id", conversation_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        return response.data is not None and len(response.data) > 0
+
+    # ========================================================================
+    # Message Operations
+    # ========================================================================
+
+    def add_message(
+        self,
+        conversation_id: str,
+        role: str,  # 'user', 'assistant', 'system'
+        content: str,
+        sql_query: Optional[str] = None,
+        sql_params: Optional[List[Any]] = None,
+        query_results_summary: Optional[Dict[str, Any]] = None,
+        execution_time: Optional[float] = None,
+        error: Optional[str] = None,
+        model_version: Optional[str] = None,
+        token_count: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add a message to a conversation
+
+        Args:
+            conversation_id: Conversation UUID
+            role: Message role ('user', 'assistant', 'system')
+            content: Message content (max 10,000 chars)
+            sql_query: Generated SQL query (for assistant messages)
+            sql_params: SQL parameters
+            query_results_summary: Summary of query results {row_count, sample_rows}
+            execution_time: Execution time in seconds
+            error: Error message if any
+            model_version: Model version used (e.g., 'gpt-4')
+            token_count: Token count for cost tracking
+            metadata: Additional metadata (cache_hit, etc.)
+
+        Returns:
+            Message data including message_id
+        """
+        # Truncate content if too long
+        if len(content) > 10000:
+            content = content[:10000]
+
+        message_data = {
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "sql_query": sql_query,
+            "sql_params": sql_params,
+            "query_results_summary": query_results_summary,
+            "execution_time": execution_time,
+            "error": error,
+            "model_version": model_version,
+            "token_count": token_count,
+            "metadata": metadata or {},
+        }
+
+        response = self.supabase.table("messages").insert(message_data).execute()
+
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+
+        raise Exception("Failed to add message")
+
+    def get_conversation_messages(
+        self,
+        conversation_id: str,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        order_desc: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get messages for a conversation with pagination
+
+        Args:
+            conversation_id: Conversation UUID
+            user_id: User UUID (for ownership verification)
+            limit: Maximum number of messages to return
+            offset: Offset for pagination
+            order_desc: If True, order by created_at DESC, else ASC
+
+        Returns:
+            List of messages
+        """
+        # First verify conversation ownership
+        conversation = self.get_conversation_by_id(conversation_id, user_id)
+        if not conversation:
+            return []
+
+        query = (
+            self.supabase.table("messages")
+            .select("*")
+            .eq("conversation_id", conversation_id)
+        )
+
+        if order_desc:
+            query = query.order("created_at", desc=True)
+        else:
+            query = query.order("created_at", desc=False)
+
+        response = query.range(offset, offset + limit - 1).execute()
+
+        return response.data if response.data else []
+
+    def get_last_n_messages(
+        self, conversation_id: str, user_id: str, n: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Get last N messages for context (ordered chronologically)
+
+        Args:
+            conversation_id: Conversation UUID
+            user_id: User UUID (for ownership verification)
+            n: Number of messages to retrieve
+
+        Returns:
+            List of last N messages in chronological order (oldest first)
+        """
+        # Get messages in DESC order (newest first)
+        messages_desc = self.get_conversation_messages(
+            conversation_id, user_id, limit=n, offset=0, order_desc=True
+        )
+
+        # Reverse to get chronological order (oldest first)
+        return list(reversed(messages_desc))
+
+    def get_conversation_message_count(self, conversation_id: str, user_id: str) -> int:
+        """
+        Get total message count for a conversation
+
+        Args:
+            conversation_id: Conversation UUID
+            user_id: User UUID (for ownership verification)
+
+        Returns:
+            Total number of messages
+        """
+        # First verify conversation ownership
+        conversation = self.get_conversation_by_id(conversation_id, user_id)
+        if not conversation:
+            return 0
+
+        response = (
+            self.supabase.table("messages")
+            .select("message_id", count="exact")
+            .eq("conversation_id", conversation_id)
+            .execute()
+        )
+
+        return response.count if response.count else 0
