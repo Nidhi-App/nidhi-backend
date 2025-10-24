@@ -6,11 +6,11 @@ Next Development Steps
 
 2. Conversation Storage Layer
 
-    [ ] Build a persistent storage layer for chat histories and context tracking.
+    [x] Build a persistent storage layer for chat histories and context tracking.
 
-    [ ] Support features like session continuity, retrieval of past interactions, and analytics on user behavior.
+    [x] Support features like session continuity, retrieval of past interactions, and analytics on user behavior.
 
-    [ ] Add Memory to the chatbot
+    [x] Add Memory to the chatbot
 
 3. Chatbot Evaluation
 
