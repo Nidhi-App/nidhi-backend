@@ -1192,7 +1192,7 @@ async def delete_conversation(conversation_id: str, user_id: str):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    chatbot_status = "enabled" if (sql_generator and text2sql_db) else "disabled"
+    chatbot_status = "enabled" if text2sql_pipeline else "disabled"
     return {
         "status": "healthy",
         "service": "nidhi-fi-backend",
