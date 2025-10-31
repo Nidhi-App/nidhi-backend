@@ -1,0 +1,15 @@
+Hi! I found 1 account:
+
+  - Account name: Chase Bank Savings
+  - Institution: Chase Bank
+  - Type: depository
+  - Balance: $44,843.88 USD
+  - Account ID: 53c75b45-6df8-4d31-a6d0-8cda0bc59a0a
+
+  Would you like me to do anything with this account, like categorize transactions or set up alerts?
+
+  So for every query after query validation (pydantic), the llm agent (4 sequential steps) will get into work? That shouldn't happen, for example, the above output was returned by the chatbot for a message 'hello
+  there!' which is a normal conversation, it shouldnt return account information for that message. What we can do is (correct me if wrong), we can add an intent classifier at the beginning (before initializing
+  llm agent) to classify what the user is asking. I belive there will be 6 kinds of queries users might ask - normal (normal conversation), accounts (queries related to their accounts), transactions (queries
+  related to their transactions), accounts and transactions (queries related to both accounts and transactions), user metadata and website queries (profile information, complaints, etc), restricted queries
+  (queries that cant and shouldnt be answered) 
