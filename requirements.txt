@@ -10,3 +10,10 @@ realtime==2.22.1
 websockets==15.0.1
 psycopg2-binary==2.9.9
 requests==2.31.0
+
+# LangGraph AI Agent Framework
+langgraph==0.2.56
+langchain==0.3.13
+langchain-openai==0.2.14
+langchain-core==0.3.28
+openai==1.59.7
