@@ -20,6 +20,9 @@ from db_operations import DatabaseOperations
 from text2sql.core.pipeline import get_pipeline
 from text2sql.cache import get_cache_manager
 
+# Import LangGraph autonomous agent
+from langgraph_agent import run_agent, IntentType
+
 # Import conversation utilities
 from conversation_utils import generate_conversation_title
 
@@ -755,6 +758,153 @@ async def chat_query(request: ChatQueryRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat query: {str(e)}"
         )
+
+
+# ============================================================================
+# LANGGRAPH AUTONOMOUS AGENT ENDPOINT
+# ============================================================================
+
+class AgentChatRequest(BaseModel):
+    """Request model for autonomous agent chat"""
+    user_id: str = Field(..., description="User UUID from Supabase Auth")
+    query: str = Field(..., description="Natural language query", max_length=500)
+    conversation_id: Optional[str] = Field(None, description="Optional conversation ID")
+
+
+class AgentChatResponse(BaseModel):
+    """Response model for autonomous agent chat"""
+    success: bool
+    user_query: str
+    response: str
+
+    # Intent classification
+    intent: str
+    intent_confidence: float
+
+    # SQL execution (if applicable)
+    sql_queries: Optional[List[str]] = None
+    results: Optional[List[dict]] = None
+    row_count: int = 0
+
+    # Metadata
+    execution_time: float = 0
+    retry_count: int = 0
+    cache_hit: bool = False
+    errors: Optional[List[str]] = None
+
+    # Conversation
+    conversation_id: Optional[str] = None
+
+
+@app.post("/api/agent/chat", response_model=AgentChatResponse)
+async def agent_chat_query(request: AgentChatRequest):
+    """
+    🤖 Autonomous AI Agent Chatbot Endpoint
+
+    This endpoint uses a TRUE autonomous AI agent powered by LangGraph with:
+    - ✅ Intent classification (routes queries intelligently)
+    - ✅ Autonomous decision-making (chooses which tools to use)
+    - ✅ Multi-step reasoning (breaks complex queries into steps)
+    - ✅ Error recovery with retries (adapts when things fail)
+    - ✅ Result validation (ensures quality responses)
+
+    This is a TRUE AI AGENT, not just a linear pipeline!
+
+    Args:
+        request: AgentChatRequest with user_id, query, and optional conversation_id
+
+    Returns:
+        AgentChatResponse with intent, response, and metadata
+    """
+    import time
+    start_time = time.time()
+
+    try:
+        logger.info(f"🤖 [AGENT] Query from user {request.user_id}: '{request.query}'")
+
+        # Run the autonomous agent
+        final_state = run_agent(
+            user_query=request.query,
+            user_id=request.user_id,
+            conversation_id=request.conversation_id
+        )
+
+        execution_time = time.time() - start_time
+
+        # Format results
+        results_list = []
+        if final_state.get("query_results"):
+            # Make results JSON serializable
+            for result in final_state["query_results"]:
+                if isinstance(result, dict):
+                    serializable_result = {}
+                    for key, value in result.items():
+                        serializable_result[key] = make_json_serializable(value)
+                    results_list.append(serializable_result)
+                else:
+                    results_list.append(make_json_serializable(result))
+
+        # Build response
+        response = AgentChatResponse(
+            success=len(final_state.get("errors", [])) == 0,
+            user_query=request.query,
+            response=final_state.get("response", "I couldn't process your request."),
+
+            # Intent
+            intent=final_state.get("intent", IntentType.UNKNOWN).value,
+            intent_confidence=final_state.get("intent_confidence", 0.0),
+
+            # SQL (if applicable)
+            sql_queries=final_state.get("sql_queries"),
+            results=results_list,
+            row_count=final_state.get("rows_affected", 0),
+
+            # Metadata
+            execution_time=execution_time,
+            retry_count=final_state.get("retry_count", 0),
+            cache_hit=final_state.get("cache_hit", False),
+            errors=final_state.get("errors") if final_state.get("errors") else None,
+
+            # Conversation
+            conversation_id=request.conversation_id
+        )
+
+        logger.info(f"✅ [AGENT] Response generated in {execution_time:.2f}s")
+        logger.info(f"   Intent: {response.intent} (confidence: {response.intent_confidence:.2f})")
+        logger.info(f"   Retries: {response.retry_count}")
+
+        return response
+
+    except Exception as e:
+        logger.error(f"❌ [AGENT] Error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Agent error: {str(e)}"
+        )
+
+
+@app.get("/api/agent/health")
+async def agent_health():
+    """
+    Health check for autonomous agent
+
+    Returns agent capabilities and status
+    """
+    return {
+        "status": "healthy",
+        "agent_type": "langgraph_autonomous",
+        "framework": "LangGraph",
+        "capabilities": [
+            "intent_classification",
+            "autonomous_routing",
+            "multi_step_reasoning",
+            "error_recovery",
+            "result_validation",
+            "retry_logic",
+            "conversation_handling"
+        ],
+        "description": "True autonomous AI agent with dynamic tool selection and multi-step reasoning"
+    }
 
 
 def _generate_nl_response(query: str, results: List[dict], row_count: int) -> str:
