@@ -24,8 +24,12 @@ except Exception as _import_err:
     get_pipeline = None
     get_cache_manager = None
 
-# Import LangGraph autonomous agent
-from langgraph_agent import run_agent, IntentType
+# Import LangGraph autonomous agent (wrapped to prevent startup crash)
+try:
+    from langgraph_agent import run_agent, IntentType
+except Exception as _langgraph_err:
+    run_agent = None
+    IntentType = None
 
 # Import conversation utilities
 from conversation_utils import generate_conversation_title
@@ -832,6 +836,12 @@ async def agent_chat_query(request: AgentChatRequest):
     Returns:
         AgentChatResponse with intent, response, and metadata
     """
+    if run_agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LangGraph agent is not available. Check deployment dependencies."
+        )
+
     import time
     start_time = time.time()
 
