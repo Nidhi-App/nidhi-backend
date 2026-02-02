@@ -16,9 +16,13 @@ from banks_config import get_all_banks, get_bank_by_code
 from fake_data_generator import FakeDataGenerator
 from db_operations import DatabaseOperations
 
-# Import text2sql pipeline
-from text2sql.core.pipeline import get_pipeline
-from text2sql.cache import get_cache_manager
+# Import text2sql pipeline (wrapped to prevent startup crash)
+try:
+    from text2sql.core.pipeline import get_pipeline
+    from text2sql.cache import get_cache_manager
+except Exception as _import_err:
+    get_pipeline = None
+    get_cache_manager = None
 
 # Import LangGraph autonomous agent
 from langgraph_agent import run_agent, IntentType
@@ -46,17 +50,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services
-data_generator = FakeDataGenerator()
-db_ops = DatabaseOperations()
+# Initialize services (wrapped to prevent startup crash if env vars are missing)
+try:
+    data_generator = FakeDataGenerator()
+except Exception as e:
+    logger.warning(f"FakeDataGenerator initialization failed: {e}")
+    data_generator = None
+
+try:
+    db_ops = DatabaseOperations()
+except Exception as e:
+    logger.warning(f"DatabaseOperations initialization failed: {e}")
+    db_ops = None
 
 # Initialize text2sql pipeline
+text2sql_pipeline = None
 try:
-    text2sql_pipeline = get_pipeline()
-    logger.info("✅ Text2SQL chatbot pipeline initialized")
+    if get_pipeline is not None:
+        text2sql_pipeline = get_pipeline()
+        logger.info("Text2SQL chatbot pipeline initialized")
 except Exception as e:
-    logger.warning(f"⚠️  Text2SQL initialization failed: {e}")
-    text2sql_pipeline = None
+    logger.warning(f"Text2SQL initialization failed: {e}")
 
 
 # Pydantic models for request/response validation
@@ -221,10 +235,12 @@ async def connect_bank(request: BankConnectRequest):
 
     Args:
         request: BankConnectRequest with user_id and bank_code
-
-    Returns:
-        BankConnectResponse with connection details and generated accounts
     """
+    if not db_ops or not data_generator:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Backend services not available. Check SUPABASE_URL and SUPABASE_KEY environment variables."
+        )
     try:
         # Validate bank code
         bank_config = get_bank_by_code(request.bank_code)
@@ -1343,9 +1359,11 @@ async def delete_conversation(conversation_id: str, user_id: str):
 async def health_check():
     """Health check endpoint"""
     chatbot_status = "enabled" if text2sql_pipeline else "disabled"
+    db_status = "connected" if db_ops else "unavailable"
     return {
         "status": "healthy",
         "service": "nidhi-fi-backend",
+        "database": db_status,
         "text2sql_chatbot": chatbot_status
     }
 
@@ -1365,6 +1383,8 @@ async def get_cache_stats():
         Cache statistics dictionary
     """
     try:
+        if get_cache_manager is None:
+            return {"enabled": False, "error": "Cache module not available"}
         cache_manager = get_cache_manager()
         stats = cache_manager.get_detailed_stats()
 
@@ -1394,6 +1414,11 @@ async def clear_cache():
         Success status
     """
     try:
+        if get_cache_manager is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cache module not available"
+            )
         cache_manager = get_cache_manager()
         cache_manager.clear()
         logger.info("🗑️  Cache cleared via API")
